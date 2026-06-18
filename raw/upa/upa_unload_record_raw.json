@@ -1,0 +1,55 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "unloadRcdId": "U001",
+            "unloadPrtNm": "울산",
+            "unloadRcdDate": "2026-06-01",
+            "vslNm": "한울호",
+            "loadPrtNm": "라스타누라",
+            "prdctTypeCn": "원유",
+            "blCagQtyCn": "48000 MT",
+            "norSbmsnDate": "2026-06-01 06:00:00",
+            "norAprvDate": "2026-06-01 07:00:00",
+            "unloadBgngDate": "2026-06-01 09:00:00",
+            "unloadCmptnDate": "2026-06-03 12:00:00",
+            "loadBgngDate": "",
+            "loadCmptnDate": "",
+            "jobRcdInfoCn": "정상하역",
+            "rmrkInfoCn": "-",
+            "regDt": "2026-06-03 13:00:00",
+            "blNoCn": "BL001"
+          },
+          {
+            "unloadRcdId": "U002",
+            "unloadPrtNm": "울산",
+            "unloadRcdDate": "2026-06-06",
+            "vslNm": "케미호",
+            "loadPrtNm": "울산",
+            "prdctTypeCn": "화학제품",
+            "blCagQtyCn": "11800 MT",
+            "norSbmsnDate": "2026-06-06 05:00:00",
+            "norAprvDate": "2026-06-06 06:00:00",
+            "unloadBgngDate": "",
+            "unloadCmptnDate": "",
+            "loadBgngDate": "2026-06-06 10:00:00",
+            "loadCmptnDate": "2026-06-06 08:00:00",
+            "jobRcdInfoCn": "적재",
+            "rmrkInfoCn": "-",
+            "regDt": "2026-06-06 20:00:00",
+            "blNoCn": "BL002"
+          }
+        ]
+      },
+      "numOfRows": 2,
+      "pageNo": 1,
+      "totalCount": 2
+    }
+  }
+}

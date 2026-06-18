@@ -1,0 +1,68 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "callsgn": "D7ABC",
+            "ptentYr": "2026",
+            "vyg": "001",
+            "mmsiNo": "440123000",
+            "imoNo": "9876543",
+            "vslNm": "한울호",
+            "lot": "129.38",
+            "lat": "35.45",
+            "sog": "3.2",
+            "cog": "180",
+            "rot": "0",
+            "hdgAng": "182",
+            "drft": "7.5",
+            "nvgtStts": "0",
+            "updtTm": "2026-06-01 08:35:00"
+          },
+          {
+            "callsgn": "D7XYZ",
+            "ptentYr": "2026",
+            "vyg": "002",
+            "mmsiNo": "440999000",
+            "imoNo": "1234567",
+            "vslNm": "바다호",
+            "lot": "130.10",
+            "lat": "36.00",
+            "sog": "45.0",
+            "cog": "400",
+            "rot": "5",
+            "hdgAng": "90",
+            "drft": "35.0",
+            "nvgtStts": "1",
+            "updtTm": "2026-06-02 12:00:00"
+          },
+          {
+            "callsgn": "",
+            "ptentYr": "2026",
+            "vyg": "003",
+            "mmsiNo": "null",
+            "imoNo": "-",
+            "vslNm": "미상",
+            "lot": "0",
+            "lat": "0",
+            "sog": "-1",
+            "cog": "100",
+            "rot": "0",
+            "hdgAng": "0",
+            "drft": "5",
+            "nvgtStts": "5",
+            "updtTm": "2026-06-02 13:00:00"
+          }
+        ]
+      },
+      "numOfRows": 3,
+      "pageNo": 1,
+      "totalCount": 3
+    }
+  }
+}

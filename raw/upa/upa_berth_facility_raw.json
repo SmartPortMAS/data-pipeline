@@ -1,0 +1,45 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "prtNm": "울산항",
+            "whrfNm": "제1부두",
+            "len": "300",
+            "dow": "12.5",
+            "brthdCapVl": "50000",
+            "brthdVslCntVl": "2",
+            "unloadCapVl": "30000",
+            "hndlCrgNm": "원유",
+            "whrfSeNm": "액체부두",
+            "lat": "35.46",
+            "lot": "129.39",
+            "ptopNm": "울산항운"
+          },
+          {
+            "prtNm": "울산항",
+            "whrfNm": "원거리부두",
+            "len": "200",
+            "dow": "10",
+            "brthdCapVl": "30000",
+            "brthdVslCntVl": "1",
+            "unloadCapVl": "20000",
+            "hndlCrgNm": "케미컬",
+            "whrfSeNm": "액체부두",
+            "lat": "36.50",
+            "lot": "130.50",
+            "ptopNm": "기타"
+          }
+        ]
+      },
+      "numOfRows": 2,
+      "pageNo": 1,
+      "totalCount": 2
+    }
+  }
+}

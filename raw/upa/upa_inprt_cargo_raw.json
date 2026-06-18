@@ -1,0 +1,34 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "prtCd": "KRUSN",
+            "ptentYr": "2026",
+            "vyg": "010",
+            "callsgn": "D7INN",
+            "vslKornNm": "내항호",
+            "vslTypeNm": "유조선",
+            "ioSeNm": "이적",
+            "fcltKornNm": "제4부두",
+            "pkgTypeMpngNm": "벌크",
+            "unloadMthdNm": "펌프",
+            "volTonUnitNm": "KL",
+            "volTon": "3000",
+            "wghtTon": "2900",
+            "ldudPrtNm": "부산",
+            "ptentDt": "2026-06-07 07:00:00"
+          }
+        ]
+      },
+      "numOfRows": 1,
+      "pageNo": 1,
+      "totalCount": 1
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "anchrgNm": "울산 제1정박지",
+            "fcltCd": "AN01",
+            "indxNo": "1",
+            "lat": "35.48",
+            "lot": "129.42",
+            "rad": "500",
+            "rmrk": "대형선",
+            "anchrgType": "검역",
+            "ttlYn": "Y",
+            "sn": "1"
+          },
+          {
+            "anchrgNm": "좌표결측정박지",
+            "fcltCd": "AN02",
+            "indxNo": "2",
+            "lat": "null",
+            "lot": "null",
+            "rad": "300",
+            "rmrk": "-",
+            "anchrgType": "일반",
+            "ttlYn": "N",
+            "sn": "2"
+          }
+        ]
+      },
+      "numOfRows": 2,
+      "pageNo": 1,
+      "totalCount": 2
+    }
+  }
+}

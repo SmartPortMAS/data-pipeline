@@ -1,0 +1,51 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "callsgn": "D7ABC",
+            "ptentVtsYr": "2026",
+            "vyg": "001",
+            "comCnt": "5",
+            "vslKornNm": "한울호",
+            "vslEngNm": "HANUL",
+            "ptentDt": "2026-06-01 08:30:00",
+            "dfptDt": "2026-06-03 14:00:00",
+            "ioprtVtsType": "I",
+            "ioprtVtsNm": "입항",
+            "fcltSpecCd": "A01",
+            "fcltSpecSubCd": "A01-1",
+            "fcltKornNm": "제1부두",
+            "updtDt": "2026-06-03 15:00:00",
+            "jobDt": "2026-06-03 15:10:00"
+          },
+          {
+            "callsgn": "D7XYZ",
+            "ptentVtsYr": "2026",
+            "vyg": "-",
+            "comCnt": "3",
+            "vslKornNm": "바다호",
+            "vslEngNm": "BADA",
+            "ptentDt": "2026-06-05 09:00:00",
+            "dfptDt": "2026-06-04 09:00:00",
+            "ioprtVtsType": "O",
+            "ioprtVtsNm": "출항",
+            "fcltSpecCd": "A02",
+            "fcltSpecSubCd": "",
+            "fcltKornNm": "제2부두",
+            "updtDt": "2026-06-05 10:00:00",
+            "jobDt": "2026-06-05 10:10:00"
+          }
+        ]
+      },
+      "numOfRows": 2,
+      "pageNo": 1,
+      "totalCount": 2
+    }
+  }
+}
