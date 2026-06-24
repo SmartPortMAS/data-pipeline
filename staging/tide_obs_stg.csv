@@ -1,0 +1,10 @@
+﻿station_id,station_name,latitude,longitude,observed_at_utc,tide_level_cm,wind_dir_deg,wind_speed_ms,gust_ms,air_temp_c,air_pressure_hpa,sea_temp_c,salinity_psu,current_dir_deg,current_speed_cms,source_system,source_table,collected_at_utc,quality_flag,is_synthetic
+DT_0020,울산,35.50194,129.38722,2026-06-23 23:00:00+00:00,38.0,28.0,5.6,7.4,20.5,1009.8,17.4,32.8,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 22:00:00+00:00,36.0,22.0,5.2,7.4,20.2,1009.4,17.4,32.8,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 21:00:00+00:00,41.0,27.0,4.2,5.5,19.8,1009.6,17.3,32.8,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 20:00:00+00:00,48.0,26.0,3.9,5.7,19.7,1009.3,17.3,32.8,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 19:00:00+00:00,50.0,23.0,3.5,4.9,19.5,1009.7,17.3,32.9,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 18:00:00+00:00,52.0,24.0,3.9,6.2,19.8,1009.8,17.3,32.9,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 17:00:00+00:00,49.0,24.0,4.5,5.6,19.7,1010.1,17.3,32.9,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 16:00:00+00:00,44.0,30.0,4.5,6.1,19.8,1010.4,17.3,32.8,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False
+DT_0020,울산,35.50194,129.38722,2026-06-23 15:00:00+00:00,40.0,34.0,5.1,6.9,19.8,1011.5,17.3,32.8,,,KDPA_KHOA_dtRecent,GetDTRecentApiService,2026-06-23 23:24:24.431571+00:00,OK,False

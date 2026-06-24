@@ -1,0 +1,59 @@
+{
+  "collected_at_utc": "2026-06-23T19:09:36.797075+00:00",
+  "last_collected_utc": "2026-06-23T23:30:44.758183+00:00",
+  "source": "MMPNT_MARINEWEATHER",
+  "station": {
+    "mmaf": "104",
+    "mmaf_name": "울산청",
+    "mmsi": "1041519",
+    "mmsi_name": "울산항동방파제서단등대",
+    "latitude": 35.4665,
+    "longitude": 129.399889
+  },
+  "record_count": 3,
+  "data": [
+    {
+      "DATETIME": "20260624034000",
+      "MMAF_CODE": "104",
+      "MMAF_NM": "울산청",
+      "MMSI_CODE": "1041519",
+      "MMSI_NM": "울산항동방파제서단등대",
+      "WIND_DIRECT": "140",
+      "WIND_SPEED": "8.22",
+      "HUMIDITY": "96",
+      "HORIZON_VISIBL": "19.8",
+      "LATITUDE": "35.4665",
+      "LONGITUDE": "129.399888889"
+    },
+    {
+      "DATETIME": "20260624080000",
+      "MMAF_CODE": "104",
+      "MMAF_NM": "울산청",
+      "MMSI_CODE": "1041519",
+      "MMSI_NM": "울산항동방파제서단등대",
+      "WIND_DIRECT": "143",
+      "WIND_SPEED": "8.22",
+      "AIR_TEMPERATURE": "20.3",
+      "HUMIDITY": "90",
+      "AIR_PRESSURE": "1008",
+      "HORIZON_VISIBL": "19.8",
+      "LATITUDE": "35.4665",
+      "LONGITUDE": "129.399888889"
+    },
+    {
+      "DATETIME": "20260624081000",
+      "MMAF_CODE": "104",
+      "MMAF_NM": "울산청",
+      "MMSI_CODE": "1041519",
+      "MMSI_NM": "울산항동방파제서단등대",
+      "WIND_DIRECT": "147",
+      "WIND_SPEED": "7.71",
+      "AIR_TEMPERATURE": "20.2",
+      "HUMIDITY": "90",
+      "AIR_PRESSURE": "1008",
+      "HORIZON_VISIBL": "19.8",
+      "LATITUDE": "35.4665",
+      "LONGITUDE": "129.399888889"
+    }
+  ]
+}
