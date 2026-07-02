@@ -1,0 +1,452 @@
+﻿port_agency_cd,port_agency_nm,entry_year,entry_count,callsgn,vessel_name,nationality_cd,nationality_nm,ship_kind_cd,ship_kind_nm,entry_purpose_cd,entry_purpose_nm,origin_port_cd,origin_port_nm,prev_port_cd,prev_port_nm,next_port_cd,next_port_nm,dest_port_cd,dest_port_nm,source_system,source_table,collected_at_utc,quality_flag,is_synthetic,ship_kind_category,is_liquid_cargo_vessel,is_domestic_voyage,port_agency_label
+820,울산,2026,2,150032,강남6005호,KR,대한민국,79,기타 부선,,,,,,,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,3,D7AD,코리아 케미,KR,대한민국,53,케미칼 운반선,03,적하,KRYOS,여수,KRYOS,여수,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,12,DSPH2,거영스타호,KR,대한민국,53,케미칼 운반선,03,적하,KRUSN,울산,KRUSN,울산,JPYOK,YOKOHAMA,JPYOK,YOKOHAMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,54,224816,루비오션호,KR,대한민국,52,석유제품 운반선,01,양적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,13,9V2137,PRINCESS IRIS,SG,싱가포르,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,23,190027,지르콘,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,19,150071,영진호,KR,대한민국,52,석유제품 운반선,03,적하,KRUSN,울산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,21,D7MJ,103 효동케미,KR,대한민국,53,케미칼 운반선,03,적하,KRTSN,대산,KRTSN,대산,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,18,300KTSRED,케이티에스 레드,KR,대한민국,52,석유제품 운반선,02,양하,KRTSN,대산,KRTSN,대산,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,60,244807,블루오션,KR,대한민국,93,급유선,03,적하,KRYOS,여수,KRYOS,여수,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,3,3FBL9,쭈꾸바 갤락시,PA,파나마,52,석유제품 운반선,03,적하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,GTPRQ,PUERTO QUETZAL,GTPRQ,PUERTO QUETZAL,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,22,039076,울산705호,KR,대한민국,61,견인용예선,02,양하,KRUSN,울산,KRDBL,대불,KRMOK,목포,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,3,XVHR7,PROGRESS,VN,베트남,41,풀컨테이너선,01,양적하,KRPUS,부산,JPTHS,TOYOHASHI,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,23,036715,대영호,KR,대한민국,52,석유제품 운반선,03,적하,KRYMH,영일만항,KRYMH,영일만항,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,41,240003,스텔라호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,19,D7UZ,308 HYODONG CHEMI,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,18,998269,울산101호,KR,대한민국,69,기타 예선,02,양하,KRUSN,울산,KRDBL,대불,KRPUS,부산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,11,018212,7새한,KR,대한민국,52,석유제품 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,53,980414,98청해호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,5,VRNZ6,SUNNY CAMELLIA,HK,홍콩,41,풀컨테이너선,01,양적하,JPKIJ,NIIGATA,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,42,230010,스카이마스,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,4,D7QA,거제 코델리아,KR,대한민국,52,석유제품 운반선,03,적하,CNNBG,NINGBO PT,CNNBG,NINGBO PT,CNYAT,YANTAI,CNYAT,YANTAI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,5LKQ7,UNIVERSAL FRONTIER,LR,라이베리아,51,원유운반선,02,양하,SAYNB,YANBU COMMERCIAL CITY,SAYNB,YANBU COMMERCIAL CITY,SGSIN,SINGAPORE,SGSIN,SINGAPORE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,울산항
+820,울산,2026,1,3FWR3,ORCA PEARL,PA,파나마,51,원유운반선,02,양하,CAVAN,VANCOUVER,CAVAN,VANCOUVER,CAVAN,VANCOUVER,CAVAN,VANCOUVER,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,울산항
+820,울산,2026,3,5LCP6,ANDES,LR,라이베리아,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,THMTP,BAN MAP TA PHUT,THMTP,BAN MAP TA PHUT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,LARB8,HUELVA KNUTSEN,NO,노르웨이,56,LNG 운반선,02,양하,SGSIN,SINGAPORE,SGSIN,SINGAPORE,AUGLT,GLADSTONE,AUGLT,GLADSTONE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LNG선,True,False,울산항
+820,울산,2026,31,200035,우원호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,43,162805,유한1호,KR,대한민국,59,기타 유조선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,5,5LJL5,STARSHIP JUPITER,LR,라이베리아,41,풀컨테이너선,01,양적하,KRUSN,울산,KRPUS,부산,CNSHA,SHANGHAI,CNSHK,SHEKOU PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,091031,우빈호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,33,140035,동방7호,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRPUS,부산,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,3,050601,HALLA NO.2,KR,대한민국,26,시멘트운반선,02,양하,KROKK,옥계항,KROKK,옥계항,KROKK,옥계항,KROKK,옥계항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,8,D7KS,거영 스타 5,KR,대한민국,52,석유제품 운반선,03,적하,JPIHA,NIIHAMA,JPIHA,NIIHAMA,CNYZH,YANGZHOU,CNYZH,YANGZHOU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,42,130037,11송원호,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,38,920757,동경102호,KR,대한민국,61,견인용예선,02,양하,KRZZZ,기타항,KRYMH,영일만항,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,2,D5XD8,SOLAR KAREN,LR,라이베리아,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,CNNSA,NANSHA PT,CNNSA,NANSHA PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,170022,이에스 릴리,KR,대한민국,52,석유제품 운반선,03,적하,KRYOC,여천항,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,33,940776,205조양,KR,대한민국,61,견인용예선,02,양하,KRPUS,부산,KRYMH,영일만항,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,2,V7A4541,SALSA,MH,마샬 제도,52,석유제품 운반선,03,적하,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,SGSIN,SINGAPORE,SGSIN,SINGAPORE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,17,JD3225,YUHO MARU NO.5,JP,일본,52,석유제품 운반선,03,적하,JPMOJ,MOJI/KITAKYUSHU,JPMOJ,MOJI/KITAKYUSHU,JPOIT,OITA,JPOIT,OITA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,28,130047,명진호,KR,대한민국,93,급유선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,3,091031,우빈호,KR,대한민국,52,석유제품 운반선,10,단순경유,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,28,170035,두라썬,KR,대한민국,52,석유제품 운반선,03,적하,KRKUV,군산,KRKUV,군산,KRKUV,군산,KRKUV,군산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,3E2083,BAO YUE,PA,파나마,39,일반화물선,02,양하,HKHKG,HONG KONG,HKHKG,HONG KONG,JPSBK,SAKAISENBOKU,JPSBK,SAKAISENBOKU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,4,9V6509,WAN HAI 290,SG,싱가포르,41,풀컨테이너선,01,양적하,JPOSA,OSAKA,JPOSA,OSAKA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,23,D7AH,에스제이 호프,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,UBBU4,FESCO ULISS ,RU,러시아,39,일반화물선,03,적하,SAJED,JEDDAH,SAJED,JEDDAH,RUPWE,PEVEK,RUPWE,PEVEK,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,51,130029,유성호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,D7IN,싸왓디 퍼시픽,KR,대한민국,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,CNTAO,QINGDAO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,32,962050,207동성호,KR,대한민국,61,견인용예선,99,기타,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,42,162805,유한1호,KR,대한민국,59,기타 유조선,03,적하,KRPUS,부산,KRPUS,부산,KRYOS,여수,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,47,131062,그린오션호,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,54,980414,98청해호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,6,D5YE8,KMTC SHIMIZU,LR,라이베리아,41,풀컨테이너선,01,양적하,CNSHA,SHANGHAI,KRKAN,광양,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,5,DSPC6,갤럭시 삼부,KR,대한민국,53,케미칼 운반선,02,양하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,27,130088,7보광호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,41,206808,한남,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRYOS,여수,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,35,240019,천왕,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRKAN,광양,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,58,230032,해성호,KR,대한민국,59,기타 유조선,03,적하,KRKAN,광양,KRKAN,광양,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,34,240043,송덕,KR,대한민국,52,석유제품 운반선,01,양적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,4,5LJZ9,LAKE TAZAWA,LR,라이베리아,27,자동차운반선,03,적하,CANWE,NEW WESTMINSTER,CANWE,NEW WESTMINSTER,USTIW,TACOMA,CANWE,NEW WESTMINSTER,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,10,7KNG,유쇼 마루,JP,일본,53,케미칼 운반선,03,적하,JPYKK,YOKKAICHI,JPYKK,YOKKAICHI,JPYKK,YOKKAICHI,JPYKK,YOKKAICHI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,38,224805,다온,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,6,5LXW5,GLOVIS TREASURE,LR,라이베리아,27,자동차운반선,03,적하,KRKAN,광양,KRKAN,광양,KRKAN,광양,CANWE,NEW WESTMINSTER,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,4,3E8776,JIN SHUN 27,PA,파나마,39,일반화물선,02,양하,RUSKA,SLAVYANKA,RUSKA,SLAVYANKA,RUVYP,VOSTOCHNYY PORT,RUVYP,VOSTOCHNYY PORT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,38,180018,나로,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,62,200009,송양1호,KR,대한민국,52,석유제품 운반선,03,적하,KRCHA,제주,KRCHA,제주,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,7,132820,13거영호,KR,대한민국,93,급유선,03,적하,KRYOS,여수,KRYOS,여수,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,2,085757,제2해진호,KR,대한민국,93,급유선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,1,VRWF4,CA MANILA,HK,홍콩,41,풀컨테이너선,01,양적하,CNSHA,SHANGHAI,KRPUS,부산,HKHKG,HONG KONG,HKHKG,HONG KONG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,20,300TNLETO,티앤 레토,KR,대한민국,52,석유제품 운반선,01,양적하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,45,DSQF4,케이티에스 화이트,KR,대한민국,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,VREV8,QIU CHI,HK,홍콩,52,석유제품 운반선,03,적하,HKHKG,HONG KONG,HKHKG,HONG KONG,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,24,H9HG,썬퀸,PA,파나마,53,케미칼 운반선,03,적하,JPMIN,MINAMATA,JPMIN,MINAMATA,JPNGY,NAGAOKAKYO,JPNGY,NAGAOKAKYO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,3,V7NQ7,MUSCAT SILVER,MH,마샬 제도,53,케미칼 운반선,03,적하,USSFO,SAN FRANCISCO,USSFO,SAN FRANCISCO,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,26,3FLI8,BLUE KINGDOM,PA,파나마,52,석유제품 운반선,03,적하,JPKIJ,NIIGATA,JPKIJ,NIIGATA,JPYAT,YATSUSHIRO,JPYAT,YATSUSHIRO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,32,120011,봉은호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,14,220046,산루이스,KR,대한민국,52,석유제품 운반선,10,단순경유,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,D5DX2,GOLD STAR,LR,라이베리아,27,자동차운반선,03,적하,CNSHA,SHANGHAI,CNSHA,SHANGHAI,ILHFA,HAIFA,ILHFA,HAIFA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,1,3FNV7,HPC WISDOM ,PA,파나마,21,산물선(벌크선),02,양하,AUGET,GERALDTON,AUGET,GERALDTON,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,19,120004,뉴동신호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,7,112815,광산,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V7FU4,UOG GALINI,MH,마샬 제도,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,USHOU,HOUSTON,USHOU,HOUSTON,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,HOA7380,자리브,PA,파나마,21,산물선(벌크선),03,적하,KRKPO,포항,KRKPO,포항,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,9V8396,FOREVER DELIGHT,SG,싱가포르,53,케미칼 운반선,03,적하,GUGUM,GUAM,GUGUM,GUAM,USANC,ANCHORAGE,USANC,ANCHORAGE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,47,240047,동남 에이스,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,085633,광양12호,KR,대한민국,29,철강재 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRTJI,당진,KRTJI,당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,23,160031,트리톤,KR,대한민국,52,석유제품 운반선,03,적하,KRCHA,제주,KRCHA,제주,KRCHA,제주,KRCHA,제주,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,A8ZM6,FPMC 27,LR,라이베리아,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,V7A7494,PAGANELLA,MH,마샬 제도,27,자동차운반선,03,적하,USNTD,PORT HUENEME,USNTD,PORT HUENEME,KRMOK,목포,AUMEL,MELBOURNE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,30,230041,청해1호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,14,DSQA4,뉴 챌린지호,KR,대한민국,53,케미칼 운반선,03,적하,KRYOS,여수,KRYOS,여수,JPSDJ,"SENDAI, MIYAGI",JPSDJ,"SENDAI, MIYAGI",PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,9,D7DD,오션에이스11,KR,대한민국,52,석유제품 운반선,02,양하,JPKAI,KAINAN,JPMIZ,MIZUSHIMA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,29,130047,명진호,KR,대한민국,93,급유선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,18,224817,울산301호,KR,대한민국,61,견인용예선,02,양하,KRUSN,울산,KRDBL,대불,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,33,166803,7미르,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,21,3E3843,HONOR VOYAGER,PA,파나마,41,풀컨테이너선,01,양적하,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,KRBNP,부산 신항,KRBNP,부산 신항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,4,091031,우빈호,KR,대한민국,52,석유제품 운반선,03,적하,KRCHF,진해,KRCHF,진해,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,41,212838,제8우진호,KR,대한민국,52,석유제품 운반선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,44,210024,송림호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,11,DSPL3,자이언트 삼부,KR,대한민국,53,케미칼 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,CNCJG,CAOJING,CNCJG,CAOJING,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,20,150010,울산103호,KR,대한민국,69,기타 예선,01,양적하,KRUSN,울산,KRDBL,대불,KRZZZ,기타항,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,41,176801,아람,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,33,180003,세양프라임,KR,대한민국,53,케미칼 운반선,03,적하,KRMOK,목포,KRMOK,목포,KRMOK,목포,KRMOK,목포,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,29,044517,천부1호,KR,대한민국,61,견인용예선,02,양하,KRZZZ,기타항,KRYMH,영일만항,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,21,048246,울산703호,KR,대한민국,61,견인용예선,02,양하,KRUSN,울산,KRDBL,대불,KRPUS,부산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,28,210023,금일,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,19,9V8001,PACIFIC BUSAN,SG,싱가포르,41,풀컨테이너선,01,양적하,KRPUS,부산,JPFKY,"FUKUYAMA, HIROSHIMA",KRPUS,부산,JPTAK,TAKAMATSU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,10,D7CT,프리티 하나,KR,대한민국,53,케미칼 운반선,03,적하,KRUSN,울산,KRUSN,울산,JPUKB,KOBE,JPUKB,KOBE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,32,224814,엠에스클린,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,43,230010,스카이마스,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,070928,태정호,KR,대한민국,52,석유제품 운반선,01,양적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,19,HOOB,SULFUR ADVANCE,PA,파나마,53,케미칼 운반선,03,적하,CNWEF,WEIFANG,CNWEF,WEIFANG,CNZHE,ZHENJIANG,CNZHE,ZHENJIANG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,19,000552,신흥8호,KR,대한민국,61,견인용예선,02,양하,KRUSN,울산,KRDBL,대불,KRPUS,부산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,1,BOUC6,RUI GAO CHUANG XIN,CN,중국,52,석유제품 운반선,03,적하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,CNHUI,HUIZHOU,CNHUI,HUIZHOU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,62,200013,유성,KR,대한민국,52,석유제품 운반선,03,적하,KRMAS,마산,KRMAS,마산,KRCHA,제주,KRCHA,제주,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,18,DSQT6,가스브로드웨이,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,울산항
+820,울산,2026,21,3EGU7,에이스 하나,PA,파나마,52,석유제품 운반선,02,양하,JPCHB,CHIBA,JPCHB,CHIBA,KRUSN,울산,JPHIJ,HIROSHIMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,49,200023,송순호,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,010797,고려103호,KR,대한민국,61,견인용예선,99,기타,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,9,D7XG,인피니티 삼부,KR,대한민국,52,석유제품 운반선,03,적하,KRTSN,대산,KRTSN,대산,CNCJG,CAOJING,CNCJG,CAOJING,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,68,210036,경성,KR,대한민국,52,석유제품 운반선,03,적하,KRTGH,동해,KRTGH,동해,KRMAS,마산,KRMAS,마산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,DSNC2,드래곤스타,KR,대한민국,26,시멘트운반선,02,양하,KRTGH,동해,KRTGH,동해,KRTGH,동해,KRTGH,동해,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,57,230026,5우영,KR,대한민국,59,기타 유조선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,45,240011,7선영,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,3,5LJZ4,ANGELIC ANNA,LR,라이베리아,99,기타선,01,양적하,CNQDG,QINGDAO PT,CNQDG,QINGDAO PT,NZTRG,TAURANGA,NZTRG,TAURANGA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,35,210016,부광5호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,8,H3PA,MORNING GENTLY,PA,파나마,55,LPG 운반선,01,양적하,JPSAK,SAKAI,JPSAK,SAKAI,CNZAP,ZHAPU,CNZAP,ZHAPU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+820,울산,2026,35,140052,세양글로리,KR,대한민국,52,석유제품 운반선,03,적하,KROKK,옥계항,KROKK,옥계항,KRMOK,목포,KRMOK,목포,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,35,250003,피닉스,KR,대한민국,52,석유제품 운반선,10,단순경유,KRTGH,동해,KRTGH,동해,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,3,170002,신정3호,KR,대한민국,52,석유제품 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,43,130037,11송원호,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,42,206808,한남,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V7A2005,PENTOZALI,MH,마샬 제도,52,석유제품 운반선,03,적하,CNYTG,YANTAI PT,CNYTG,YANTAI PT,SGSIN,SINGAPORE,SGSIN,SINGAPORE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,4,VRNJ5,DIAMOND EXPRESS,HK,홍콩,51,원유운반선,01,양적하,JPCHB,CHIBA,JPCHB,CHIBA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,울산항
+820,울산,2026,63,200009,송양1호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRCHA,제주,KRCHA,제주,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,57,DSNA3,제1한미르호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,33,120011,봉은호,KR,대한민국,52,석유제품 운반선,99,기타,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V7B2946,STAITHES,MH,마샬 제도,21,산물선(벌크선),02,양하,KRKAN,광양,KRKAN,광양,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,27,3ECG6,SUN VENUS,PA,파나마,52,석유제품 운반선,02,양하,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,18,DSMB,우혁,KR,대한민국,52,석유제품 운반선,01,양적하,KRTSN,대산,KRTSN,대산,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,20,224810,케이에스 아너,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,D8QR,성호갤럭시호,KR,대한민국,53,케미칼 운반선,02,양하,KRTSN,대산,KRTSN,대산,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,17,D7XD,거영 블루 7,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,JPNGO,"NAGOYA, AICHI",JPNGO,"NAGOYA, AICHI",PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,17,V7A5455,SAWASDEE SHANGHAI,MH,마샬 제도,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,CNTSN,TIANJIN,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,12,D8DJ,스카이 빅토리아,KR,대한민국,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,33,130064,에이원,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,9HA6117,CMA CGM MONZA,MT,몰타,27,자동차운반선,01,양적하,KRMAS,마산,KRMAS,마산,KRKAN,광양,ITCVV,CIVITAVECCHIA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,13,3E6941,MIR HANA,PA,파나마,53,케미칼 운반선,02,양하,JPCHB,CHIBA,JPCHB,CHIBA,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,22,190026,21부영호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,13,DSRG6,107효동케미,KR,대한민국,53,케미칼 운반선,03,적하,JPKOK,KOKURA,JPKOK,KOKURA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,54,122801,12삼부호,KR,대한민국,52,석유제품 운반선,03,적하,KRSHG,포항신항,KRSHG,포항신항,KRSHG,포항신항,KRSHG,포항신항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,55,224816,루비오션호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,37,244802,동해글로리,KR,대한민국,52,석유제품 운반선,03,적하,KRUSN,울산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,12,3EVI5,JOY CHEMIST,PA,파나마,52,석유제품 운반선,03,적하,CNTAC,TAICANG PT,CNTAC,TAICANG PT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,22,3EGU7,에이스 하나,PA,파나마,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,JPHIJ,HIROSHIMA,JPHIJ,HIROSHIMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,5,3E5968,SUNNY VIOLET,PA,파나마,41,풀컨테이너선,01,양적하,JPHKT,HAKATA/FUKUOKA,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,15,DSPF9,보넨자,KR,대한민국,53,케미칼 운반선,03,적하,JPOSA,OSAKA,JPOSA,OSAKA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,9,V7ER5,스카이 제이드,MH,마샬 제도,41,풀컨테이너선,01,양적하,KRPUS,부산,JPKNZ,KANAZAWA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,3E2364,APOLLO EIGHT,PA,파나마,39,일반화물선,03,적하,JPIMI,IMARI,JPIMI,IMARI,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,22,171071,티앤 레아,KR,대한민국,52,석유제품 운반선,03,적하,KRMOK,목포,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,55,240001,에이치와이 광양,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,40,204007,럭키오션호,KR,대한민국,59,기타 유조선,03,적하,KRCHA,제주,KRCHA,제주,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,41,240018,에코 가스,KR,대한민국,55,LPG 운반선,03,적하,KRCHA,제주,KRCHA,제주,KRCHA,제주,KRCHA,제주,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,울산항
+820,울산,2026,1,V7TT7,ALPINE LIBERTY,MH,마샬 제도,52,석유제품 운반선,03,적하,AUBTB,BOTANY BAY,AUBTB,BOTANY BAY,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,3E8544,GOLDEN CALYPSO,PA,파나마,52,석유제품 운반선,01,양적하,MYKUA,KUANTAN (TANJONG GELANG),MYKUA,KUANTAN (TANJONG GELANG),,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,3E4964,VORTEX RIVER,PA,파나마,21,산물선(벌크선),02,양하,PECLL,CALLAO,PECLL,CALLAO,JPSAG,SAGANOSEKI,JPSAG,SAGANOSEKI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,5,3FJT4,SILVER LEO,PA,파나마,53,케미칼 운반선,03,적하,JPUKB,KOBE,JPUKB,KOBE,MYPGU,"PASIR GUDANG, JOHOR",MYPGU,"PASIR GUDANG, JOHOR",PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,4,BQTK,ZHONG GU PENG LAI,CN,중국,41,풀컨테이너선,01,양적하,SADMM,AD DAMMAM,KRYMH,영일만항,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,45,230007,카리스(CHARIS),KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,22,DSMS2,우춘호,KR,대한민국,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,3,VRQJ4,OAK EXPRESS,HK,홍콩,51,원유운반선,03,적하,KRUSN,울산,KRUSN,울산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,True,울산항
+820,울산,2026,11,D7BW,타이하이 5,KR,대한민국,53,케미칼 운반선,03,적하,TWTPE,TAIPEI,TWTPE,TAIPEI,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,48,210043,에이치와이 부산,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V7B3200,GRAND RACE,MH,마샬 제도,27,자동차운반선,03,적하,KRMAS,마산,KRMAS,마산,KRKAN,광양,USBNC,BENICIA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,VRUI5,GC BERYL,HK,홍콩,53,케미칼 운반선,03,적하,CNZJG,ZHANGJIAGANG,CNZJG,ZHANGJIAGANG,SGSIN,SINGAPORE,SGSIN,SINGAPORE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,34,140035,동방7호,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRPUS,부산,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,39,230029,보문,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,33,962050,207동성호,KR,대한민국,61,견인용예선,99,기타,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,42,240003,스텔라호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,3,3FBC4,ORIENTAL EMERALD,PA,파나마,21,산물선(벌크선),02,양하,JPHIB,HIBI,JPHIB,HIBI,JPHIB,HIBI,JPHIB,HIBI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,64,210003,21동방호,KR,대한민국,52,석유제품 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,BPLR4,ZHONG CHUAN 701,CN,중국,52,석유제품 운반선,03,적하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,VNHPH,HAIPHONG,VNHPH,HAIPHONG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,4,3FHO8,SUNNY LAVENDER,PA,파나마,41,풀컨테이너선,01,양적하,KRINC,인천,JPCHB,CHIBA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,D7DQ,제니스 실버,KR,대한민국,39,일반화물선,02,양하,JPKGA,KAKOGAWA,JPKGA,KAKOGAWA,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,52,130029,유성호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,3E3683,SAEHAN ASTRO,PA,파나마,55,LPG 운반선,03,적하,CNCJG,CAOJING,CNCJG,CAOJING,CNZAP,ZHAPU,CNZAP,ZHAPU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+820,울산,2026,4,DSEZ7,마린가스,KR,대한민국,55,LPG 운반선,02,양하,JPOIT,OITA,JPOIT,OITA,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+820,울산,2026,1,BFBE,FU LONG,CN,중국,21,산물선(벌크선),02,양하,CNTAZ,TAIZHOU PT,CNTAZ,TAIZHOU PT,JPSBS,SHIBUSHI,JPSBS,SHIBUSHI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,14,D7IE,에프씨 델라,KR,대한민국,53,케미칼 운반선,02,양하,KRTSN,대산,KRTSN,대산,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,1,3E2608,KANG SHUN 88,PA,파나마,39,일반화물선,03,적하,KRINC,인천,KRINC,인천,CNSHG,SHANGHAI PT,CNSHG,SHANGHAI PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,9V9220,SANMAR SONATINA,SG,싱가포르,52,석유제품 운반선,03,적하,JPYKK,YOKKAICHI,JPYKK,YOKKAICHI,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,59,230032,해성호,KR,대한민국,59,기타 유조선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,22,D7ZP,케이티에스그린,KR,대한민국,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,10,130001,동진에이스호,KR,대한민국,93,급유선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,18,3EKP7,SPRING EURO,PA,파나마,53,케미칼 운반선,03,적하,JPOIG,OHIGAWA,JPOIG,OHIGAWA,JPMIN,MINAMATA,JPMIN,MINAMATA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,1,V3WO4,HIDEMI,BZ,벨리즈,39,일반화물선,03,적하,KROKP,옥포,KROKP,옥포,CNCGS,CHANGSHU PT,CNCGS,CHANGSHU PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,V3PP,JIA LONG,BZ,벨리즈,39,일반화물선,03,적하,KRPUS,부산,KRPUS,부산,CNCGS,CHANGSHU PT,CNCGS,CHANGSHU PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,V7A3853,MAGNATE,MH,마샬 제도,53,케미칼 운반선,03,적하,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,USHNL,HONOLULU,USHNL,HONOLULU,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,6,T8A5549,스카이 뷰티호,PW,팔라우,39,일반화물선,03,적하,CNTAC,TAICANG PT,CNTAC,TAICANG PT,CNTSI,JINGJIANG,CNTSI,JINGJIANG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,7,D7CO,팬콘 선샤인,KR,대한민국,41,풀컨테이너선,01,양적하,JPKNZ,KANAZAWA,JPKNZ,KANAZAWA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,19,192801,그레이스 알파,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,35,140035,동방7호,KR,대한민국,52,석유제품 운반선,10,단순경유,KRYOS,여수,KRYOS,여수,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,3,D7KE,QUARTERBACK J,KR,대한민국,52,석유제품 운반선,03,적하,JPUKB,KOBE,JPUKB,KOBE,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,12,3E2725,SUN ROYAL,PA,파나마,53,케미칼 운반선,02,양하,KRPTK,평택.당진,KRPTK,평택.당진,CNTAX,TAIXING,CNTAX,TAIXING,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,2,SKJC,ANIARA,SE,스웨덴,27,자동차운반선,03,적하,KRMAS,마산,KRMAS,마산,KRMAS,마산,USNTD,PORT HUENEME,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,23,190026,21부영호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRSCP,삼천포,KRSCP,삼천포,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,33,200031,3명광호,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,11,D8NI,강남티-17호,KR,대한민국,61,견인용예선,02,양하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,8,240017,할라크,KR,대한민국,52,석유제품 운반선,02,양하,KRYOC,여천항,KRYOC,여천항,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,48,240047,동남 에이스,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,30,232806,뉴금창골드,KR,대한민국,59,기타 유조선,03,적하,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,52,192827,우성,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRTGH,동해,KRTGH,동해,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,31,230041,청해1호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,39,180018,나로,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,S9A8,RUI YANG 7,ST,상투메 프린시페,39,일반화물선,02,양하,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,61,244807,블루오션,KR,대한민국,93,급유선,03,적하,KRKAN,광양,KRKAN,광양,KRHAD,하동화력,KRHAD,하동화력,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,34,130064,에이원,KR,대한민국,52,석유제품 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,10,170022,이에스 릴리,KR,대한민국,52,석유제품 운반선,03,적하,KRUSN,울산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,24,211024,디엘 앰버,KR,대한민국,52,석유제품 운반선,02,양하,KRTSN,대산,KRTSN,대산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,7,240030,스프링 알파,KR,대한민국,53,케미칼 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,18,3E8387,SUNNY ORCHID,PA,파나마,41,풀컨테이너선,01,양적하,KRYMH,영일만항,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,46,DSQF4,케이티에스 화이트,KR,대한민국,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,17,5LNE2,PEGASUS GRACE,LR,라이베리아,41,풀컨테이너선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,ZCSP6,STOLT EFFORT,KY,케이맨 제도,52,석유제품 운반선,03,적하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,JPYOK,YOKOHAMA,JPYOK,YOKOHAMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,21,000637,울산107호,KR,대한민국,69,기타 예선,02,양하,KRUSN,울산,KRDBL,대불,KRMOK,목포,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,20,922517,울산109호,KR,대한민국,69,기타 예선,02,양하,KRUSN,울산,KRDBL,대불,KRMOK,목포,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,3E2477,SUN NEPTUNE,PA,파나마,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,JPUKB,KOBE,JPUKB,KOBE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V7A4044,DELAVITA,MH,마샬 제도,21,산물선(벌크선),02,양하,CLCOL,CALETA COLOSO,CLCOL,CALETA COLOSO,CNQIN,QINGDAO,CNQIN,QINGDAO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,5,T8A5548,SKY ALICE,PA,파나마,39,일반화물선,03,적하,CNNSA,NANSHA PT,CNNSA,NANSHA PT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,4,CQCL,POLAR,PT,포르투갈,55,LPG 운반선,01,양적하,IDBXT,"BONTANG, KL",TWTXG,TAICHUNG,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+820,울산,2026,34,166803,7미르,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,LATA8,BOW ENDEAVOR,NO,노르웨이,52,석유제품 운반선,03,적하,CNNTG,NANTONG,CNNTG,NANTONG,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,4,D7TL,제3그린파이오니어,KR,대한민국,53,케미칼 운반선,02,양하,IDBPN,BALIKPAPAN,IDBPN,BALIKPAPAN,OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,35,DSFN9,우선호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRMOK,목포,KRMOK,목포,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,DSRL7,누리 하나호,KR,대한민국,52,석유제품 운반선,01,양적하,JPCHB,CHIBA,JPCHB,CHIBA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,4,3E5991,광양보이져,PA,파나마,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,CNSHA,SHANGHAI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,LATJ8,MANON,NO,노르웨이,27,자동차운반선,03,적하,KRMAS,마산,KRMAS,마산,USSSI,BRUNSWICK,USPHL,PHILADELPHIA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,3FEE,C. PRIMACY,PA,파나마,51,원유운반선,02,양하,AEFJR,AL FUJAYRAH,AEFJR,AL FUJAYRAH,SGSIN,SINGAPORE,AEFJR,AL FUJAYRAH,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,울산항
+820,울산,2026,2,D5HE4,NAVIGATOR CERES,LR,라이베리아,55,LPG 운반선,02,양하,CAPRR,PRINCE RUPERT,CAPRR,PRINCE RUPERT,CAPRR,PRINCE RUPERT,CAPRR,PRINCE RUPERT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+820,울산,2026,46,240011,7선영,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,45,210024,송림호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,17,230040,아라1호,KR,대한민국,52,석유제품 운반선,01,양적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,44,230010,스카이마스,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,58,DSNA3,제1한미르호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,39,224805,다온,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,61,184803,진양1호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRMAS,마산,KRMAS,마산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,14,DSOV4,거영쎄븐호,KR,대한민국,53,케미칼 운반선,02,양하,CNTAX,TAIXING,CNTAX,TAIXING,JPCHB,CHIBA,JPCHB,CHIBA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,44,130037,11송원호,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRPUS,부산,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,16,HO9294,KEOYOUNG BLUE 3,PA,파나마,52,석유제품 운반선,03,적하,CNZHE,ZHENJIANG,CNZHE,ZHENJIANG,JPNGO,"NAGOYA, AICHI",JPNGO,"NAGOYA, AICHI",PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,10,DSIU5,우금호,KR,대한민국,52,석유제품 운반선,02,양하,TWKHH,KAOHSIUNG,TWKHH,KAOHSIUNG,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,7,D7OO,골든 키 하나호,KR,대한민국,52,석유제품 운반선,02,양하,CNZJG,ZHANGJIAGANG,CNZJG,ZHANGJIAGANG,JPUKB,KOBE,JPUKB,KOBE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,10,D7DD,오션에이스11,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,58,230026,5우영,KR,대한민국,59,기타 유조선,03,적하,KRMAS,마산,KRMAS,마산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,18,DSFM6,루나 하나,KR,대한민국,52,석유제품 운반선,03,적하,JPNGO,"NAGOYA, AICHI",JPNGO,"NAGOYA, AICHI",JPSAK,SAKAI,JPSAK,SAKAI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,9,7JQC,RYOUMEI MARU,JP,일본,52,석유제품 운반선,03,적하,JPSBK,SAKAISENBOKU,JPSBK,SAKAISENBOKU,JPKJK,KAJIKI,JPKJK,KAJIKI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,69,210036,경성,KR,대한민국,52,석유제품 운반선,03,적하,KRMAS,마산,KRMAS,마산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,22,D7MJ,103 효동케미,KR,대한민국,53,케미칼 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,1,5LDR6,LARGO EAGLE,LR,라이베리아,53,케미칼 운반선,03,적하,AUDPO,DEVONPORT,AUDPO,DEVONPORT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,67,220023,창용1호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRYOS,여수,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,11,140030,201조양,KR,대한민국,61,견인용예선,02,양하,KRPUS,부산,KRZZZ,기타항,KRZZZ,기타항,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,62,244807,블루오션,KR,대한민국,93,급유선,03,적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,1,5LVV5,BETA,LR,라이베리아,53,케미칼 운반선,,,,,,,MYPGU,"PASIR GUDANG, JOHOR",MYPGU,"PASIR GUDANG, JOHOR",PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,7,VRIC3,STOLT DISTRIBUTOR,HK,홍콩,52,석유제품 운반선,03,적하,CNSHA,SHANGHAI,CNSHA,SHANGHAI,CNZJG,ZHANGJIAGANG,CNZJG,ZHANGJIAGANG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,56,240001,에이치와이 광양,KR,대한민국,52,석유제품 운반선,03,적하,KRKAN,광양,KRKAN,광양,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,34,940776,205조양,KR,대한민국,61,견인용예선,02,양하,KRPUS,부산,KRZZZ,기타항,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,39,920757,동경102호,KR,대한민국,61,견인용예선,02,양하,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,여객선,False,True,울산항
+820,울산,2026,13,D7TR,라이징 삼부,KR,대한민국,52,석유제품 운반선,02,양하,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,KRZZZ,기타항,KRZZZ,기타항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,19,D7BC,홍콩 보이저,KR,대한민국,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,CNNGB,NINGBO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,1,V3NY6,QI SHAN,BZ,벨리즈,39,일반화물선,02,양하,CNWFG,WEIFANG,CNWFG,WEIFANG,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,9,161047,포세이돈,KR,대한민국,39,일반화물선,03,적하,KRSCP,삼천포,KRSCP,삼천포,KRCHA,제주,KRCHA,제주,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,3,V7VF8,STI ESLES II,MH,마샬 제도,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,3FIR7,DONG-A METIS,PA,파나마,27,자동차운반선,03,적하,USSAN,SAN DIEGO,USSAN,SAN DIEGO,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,1,D7BG,글로비스 서밋,KR,대한민국,27,자동차운반선,03,적하,KRMAS,마산,KRMAS,마산,KRKAN,광양,UYMVD,MONTEVIDEO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,35,130064,에이원,KR,대한민국,52,석유제품 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,49,210043,에이치와이 부산,KR,대한민국,52,석유제품 운반선,03,적하,KRKAN,광양,KRKAN,광양,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,22,190025,케이 가스,KR,대한민국,55,LPG 운반선,01,양적하,KRTSN,대산,KRTSN,대산,KRTSN,대산,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,울산항
+820,울산,2026,21,160064,제1은희호,KR,대한민국,59,기타 유조선,03,적하,KRPUS,부산,KRPUS,부산,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,20,D7XP,WECAN,KR,대한민국,41,풀컨테이너선,01,양적하,CNNBO,NINGBO,JPOIT,OITA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,2,V7A4360,FRONTIER MARINER,MH,마샬 제도,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,PGZZZ,PAPUA NEW GUINEA /OT,PGZZZ,PAPUA NEW GUINEA /OT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,30,210041,한유울산,KR,대한민국,52,석유제품 운반선,03,적하,KRCHA,제주,KRCHA,제주,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,64,200009,송양1호,KR,대한민국,52,석유제품 운반선,03,적하,KRCHA,제주,KRCHA,제주,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,19,DSQT6,가스브로드웨이,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,JPTKY,TOKUYAMA,JPTKY,TOKUYAMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,울산항
+820,울산,2026,3,V7A5459,HANSA SEALIFTER,MH,마샬 제도,52,석유제품 운반선,03,적하,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,42,176801,아람,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRPUS,부산,KRTGH,동해,KRTGH,동해,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,16,D7VA,거영블루5,KR,대한민국,52,석유제품 운반선,03,적하,JPYOK,YOKOHAMA,JPYOK,YOKOHAMA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,5,3EPM8,PRINCESS TOPAZ,PA,파나마,52,석유제품 운반선,02,양하,CNZJG,ZHANGJIAGANG,CNZJG,ZHANGJIAGANG,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,6,BPPV2,XUAN JING,CN,중국,53,케미칼 운반선,02,양하,KRYOS,여수,KRYOS,여수,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,6,D7IL,싸왓디 발틱,KR,대한민국,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,HKHKG,HONG KONG,TWKEL,KEELUNG (CHILUNG),PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,3,9V8080,WAN HAI 308,SG,싱가포르,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,TWTPE,TAIPEI,TWTPE,TAIPEI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,6,212803,다인3호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,44,162805,유한1호,KR,대한민국,59,기타 유조선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,30,130047,명진호,KR,대한민국,93,급유선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,22,DSRI7,팬콘 석세스호,KR,대한민국,41,풀컨테이너선,01,양적하,JPTYO,TOKYO,JPTYO,TOKYO,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,41,160063,스카이케미,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRSHG,포항신항,KRSHG,포항신항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,13,151058,미라클 알파,KR,대한민국,53,케미칼 운반선,01,양적하,KRYOS,여수,KRYOS,여수,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,53,130029,유성호,KR,대한민국,52,석유제품 운반선,03,적하,KRMAS,마산,KRMAS,마산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,17,021568,101효동케미호,KR,대한민국,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,23,DSMS2,우춘호,KR,대한민국,52,석유제품 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,43,206808,한남,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRSHG,포항신항,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,10,DSQP2,HANYU EMPIRE,KR,대한민국,52,석유제품 운반선,03,적하,CNLSN,LANSHAN PT,CNLSN,LANSHAN PT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,29,236808,한동27호,KR,대한민국,52,석유제품 운반선,03,적하,KRKAN,광양,KRKAN,광양,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,D8VO,WOOJIN KELLY,KR,대한민국,52,석유제품 운반선,02,양하,KRTSN,대산,KRTSN,대산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,12,V7IQ4,STARSHIP TAURUS,MH,마샬 제도,41,풀컨테이너선,01,양적하,VNHPH,HAIPHONG,KRPUS,부산,VNHPH,HAIPHONG,CNSHK,SHEKOU PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,10,D7DL,우황,KR,대한민국,52,석유제품 운반선,01,양적하,CNQDG,QINGDAO PT,CNQDG,QINGDAO PT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,56,224816,루비오션호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,48,131062,그린오션호,KR,대한민국,52,석유제품 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,21,130010,32대영호,KR,대한민국,93,급유선,03,적하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,울산항
+820,울산,2026,46,230007,카리스(CHARIS),KR,대한민국,52,석유제품 운반선,03,적하,KRMAS,마산,KRMAS,마산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,32,200035,우원호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,37,230014,23부광호,KR,대한민국,59,기타 유조선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,울산항
+820,울산,2026,58,190008,부광호,KR,대한민국,52,석유제품 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,40,224805,다온,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,30,3FBF6,ANGEL BLUE,PA,파나마,52,석유제품 운반선,03,적하,JPHKT,HAKATA/FUKUOKA,JPHKT,HAKATA/FUKUOKA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,16,161063,우현,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRKUV,군산,KRKUV,군산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V3UW2,REN HE,BZ,벨리즈,39,일반화물선,03,적하,KRKUV,군산,KRKUV,군산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,C6TD3,RCC AFRICA,BS,바하마,27,자동차운반선,03,적하,KRMOK,목포,KRMOK,목포,CAHAL,HALIFAX,MXATM,ALTAMIRA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,6,BPXS7,DU JUAN,CN,중국,53,케미칼 운반선,02,양하,CNMMI,MAOMING,CNMMI,MAOMING,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,68,220023,창용1호,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRKAN,광양,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,53,192827,우성,KR,대한민국,52,석유제품 운반선,03,적하,KRTGH,동해,KRTGH,동해,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,8,240030,스프링 알파,KR,대한민국,53,케미칼 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,울산항
+820,울산,2026,5,V7A6629,LUCKY FEB,MH,마샬 제도,51,원유운반선,03,적하,KRTSN,대산,KRTSN,대산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,True,울산항
+820,울산,2026,1,KSIJ,STENA IMPECCABLE,US,미국,52,석유제품 운반선,09,선용품적재,SGSIN,SINGAPORE,SGSIN,SINGAPORE,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,7,D7XH,스타 익스프레스,KR,대한민국,41,풀컨테이너선,03,적하,KRUSN,울산,KRPUS,부산,KRKAN,광양,CNDAL,DALIAN,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,V7A4132,PRIME FORTUNE,MH,마샬 제도,52,석유제품 운반선,02,양하,CNNSA,NANSHA PT,CNNSA,NANSHA PT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,6,3FQP5,BUENA ESPERANZA,PA,파나마,55,LPG 운반선,02,양하,CNPJI,PANJIN,CNPJI,PANJIN,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+820,울산,2026,19,D7BV,하나 파이오니어,KR,대한민국,53,케미칼 운반선,03,적하,JPUBJ,UBE,JPUBJ,UBE,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,2,3E7662,ARTEMIDA,PA,파나마,52,석유제품 운반선,02,양하,RUVYP,VOSTOCHNYY PORT,RUVYP,VOSTOCHNYY PORT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,C6BO7,HELIOS RAY,BS,바하마,27,자동차운반선,03,적하,KRMAS,마산,KRMAS,마산,KRMAS,마산,USNTD,PORT HUENEME,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,2,D7DI,거제 이션,KR,대한민국,52,석유제품 운반선,03,적하,KRZZZ,기타항,KRZZZ,기타항,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,20,134806,지 위즈덤,KR,대한민국,55,LPG 운반선,03,적하,KRCHA,제주,KRCHA,제주,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,울산항
+820,울산,2026,13,D7RJ,거영스타3,KR,대한민국,53,케미칼 운반선,03,적하,JPTGO,TAGONOURA,JPTGO,TAGONOURA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,16,D7WH,우리 하나,KR,대한민국,52,석유제품 운반선,03,적하,JPIHA,NIIHAMA,JPIHA,NIIHAMA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,T7DH2,WELLSEA MEIHANG,SM,산 마리노,53,케미칼 운반선,03,적하,CNTZO,TAIZHOU,CNTZO,TAIZHOU,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,울산항
+820,울산,2026,7,BPKY8,ZI DING XIANG,CN,중국,52,석유제품 운반선,03,적하,CNNGB,NINGBO,CNNGB,NINGBO,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,VRQM4,NEW VICTORY,HK,홍콩,51,원유운반선,02,양하,USGLS,GALVESTON,USGLS,GALVESTON,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,울산항
+820,울산,2026,6,3E2049,EVER CONNECT,PA,파나마,41,풀컨테이너선,01,양적하,JPHKT,HAKATA/FUKUOKA,JPHKT,HAKATA/FUKUOKA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,4,HZCR,KAHLA,SA,사우디아라비아,51,원유운반선,02,양하,SAYNB,YANBU COMMERCIAL CITY,SGSIN,SINGAPORE,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,울산항
+820,울산,2026,12,D7CV,로얄삼부,KR,대한민국,52,석유제품 운반선,02,양하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,22,120059,부양에이스,KR,대한민국,52,석유제품 운반선,03,적하,KRMAS,마산,KRMAS,마산,KRMUK,묵호,KRMUK,묵호,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,36,130064,에이원,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,2,ZCGE5,STOLT PERSEVERANCE,KY,케이맨 제도,52,석유제품 운반선,02,양하,JPUKB,KOBE,JPUKB,KOBE,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,A8YU4,NAVE POLARIS,LR,라이베리아,52,석유제품 운반선,03,적하,CNNBG,NINGBO PT,CNNBG,NINGBO PT,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,2,DSRB4,에스제이아너호,KR,대한민국,39,일반화물선,02,양하,KRPUS,부산,KRPUS,부산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,29,170035,두라썬,KR,대한민국,52,석유제품 운반선,03,적하,KRONS,온산,KRKUV,군산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,1,V7GX8,HAFNIA ADAMITE,MH,마샬 제도,52,석유제품 운반선,02,양하,PACTB,CRISTOBAL,PACTB,CRISTOBAL,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,16,DSND9,퍼시픽 삼부,KR,대한민국,52,석유제품 운반선,03,적하,JPTSG,TAKASAGO,JPTSG,TAKASAGO,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,3E7104,HONG YANG 19,PA,파나마,39,일반화물선,02,양하,RUNJK,NAKHODKA,RUNJK,NAKHODKA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,울산항
+820,울산,2026,1,9V8000,퍼시픽 베이징,SG,싱가포르,41,풀컨테이너선,01,양적하,KRPUS,부산,KRPUS,부산,KRKAN,광양,CNNGB,NINGBO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,울산항
+820,울산,2026,42,212838,제8우진호,KR,대한민국,52,석유제품 운반선,02,양하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,62,184803,진양1호,KR,대한민국,52,석유제품 운반선,03,적하,KRMAS,마산,KRMAS,마산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,16,3E2119,CS HANA,PA,파나마,52,석유제품 운반선,03,적하,TWMLI,MAI-LIAO,TWMLI,MAI-LIAO,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,울산항
+820,울산,2026,1,CQXC,CHEM SAIPH,PT,포르투갈,52,석유제품 운반선,03,적하,KRPTK,평택.당진,KRPTK,평택.당진,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,울산항
+820,울산,2026,9,D8MS,엠에스땡스,KR,대한민국,55,LPG 운반선,03,적하,JPOIT,OITA,JPOIT,OITA,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,울산항
+300,대산,2026,12,D7TM,케이티에스 실버,KR,대한민국,53,케미칼 운반선,02,양하,KRYOC,여천항,KRYOC,여천항,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,42,088443,이에스 로즈,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,46,D7NF,두라 스타,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,7,DSRP5,레이디가스,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,15,912KG,케이티에스 골드,KR,대한민국,53,케미칼 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,13,3E3422,GAS FAIRWAY,PA,파나마,55,LPG 운반선,03,적하,KRPTK,평택.당진,KRPTK,평택.당진,CNTNG,TIANJIN PT,CNTNG,TIANJIN PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,2,DSQF5,성호 피오스호,KR,대한민국,52,석유제품 운반선,03,적하,CNNBG,NINGBO PT,CNNBG,NINGBO PT,CNDAG,DALIAN PT,CNDAG,DALIAN PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,17,V7B3104,PILATUS 65,MH,마샬 제도,55,LPG 운반선,03,적하,CNCGS,CHANGSHU PT,CNCGS,CHANGSHU PT,CNLYG,LIANYUNGANG,CNLYG,LIANYUNGANG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,17,151058,미라클 알파,KR,대한민국,53,케미칼 운반선,02,양하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,10,DSMD,우림 5,KR,대한민국,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,25,241802,상금,KR,대한민국,52,석유제품 운반선,02,양하,KRMOK,목포,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,42,150012,15선영호,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRPTK,평택.당진,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,27,D7IE,에프씨 델라,KR,대한민국,53,케미칼 운반선,03,적하,KRPTK,평택.당진,KRPTK,평택.당진,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,18,150035,한유파이오니아,KR,대한민국,52,석유제품 운반선,02,양하,KRPTK,평택.당진,KRPTK,평택.당진,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,24,250025,선 프린세스,KR,대한민국,53,케미칼 운반선,03,적하,KRUSN,울산,KRUSN,울산,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,24,D7BU,아시아가스호,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,5,BPXC6,YUAN SHAN 9,CN,중국,55,LPG 운반선,03,적하,CNNGB,NINGBO,CNNGB,NINGBO,CNNGB,NINGBO,CNNGB,NINGBO,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,1,3EGC3,LILAC PROMENADE,PA,파나마,55,LPG 운반선,02,양하,USNDX,"NEDERLAND, TX",KRYOS,여수,USMAH,MARCUS HOOK,USMAH,MARCUS HOOK,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,38,210019,동수1,KR,대한민국,52,석유제품 운반선,03,적하,KRMOK,목포,KRMOK,목포,KRMOK,목포,KRMOK,목포,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,35,D8BU,포천 카렌,KR,대한민국,53,케미칼 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,2,3EAW4,HESTIANA,PA,파나마,53,케미칼 운반선,03,적하,TWKEL,KEELUNG (CHILUNG),TWKEL,KEELUNG (CHILUNG),CNZJG,ZHANGJIAGANG,CNZJG,ZHANGJIAGANG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,온산항
+300,대산,2026,14,D7BB,제이앤 카멜리아,KR,대한민국,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,7,D7QL,BS DAESAN,KR,대한민국,53,케미칼 운반선,03,적하,KRYOS,여수,KRYOS,여수,CNYAT,YANTAI,CNYAT,YANTAI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,2,3EOM3,GAS ELEGANCE,PA,파나마,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,JPCHB,CHIBA,JPCHB,CHIBA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,4,DSPD6,그레이스삼부,KR,대한민국,53,케미칼 운반선,02,양하,KRUSN,울산,KRUSN,울산,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,32,DSR217803,대진호,KR,대한민국,93,급유선,08,급유,KRTSN,대산,KRBOR,보령,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,2,9V8365,HAFNIA LANGUEDOC,SG,싱가포르,52,석유제품 운반선,02,양하,MYBTU,"BINTULU, SARAWAK",MYBTU,"BINTULU, SARAWAK",OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,10,3E3863,포스 칭다오,PA,파나마,41,풀컨테이너선,01,양적하,KRINC,인천,KRINC,인천,KRKAN,광양,KRKAN,광양,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,온산항
+300,대산,2026,17,161063,우현,KR,대한민국,52,석유제품 운반선,03,적하,KRKUV,군산,KRKUV,군산,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,14,D7PG,에프씨 글로리아,KR,대한민국,52,석유제품 운반선,03,적하,CNCJG,CAOJING,CNCJG,CAOJING,CNLYG,LIANYUNGANG,CNLYG,LIANYUNGANG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,2,D7DI,거제 이션,KR,대한민국,52,석유제품 운반선,03,적하,KRMOK,목포,KRMOK,목포,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,43,180010,두라스카이,KR,대한민국,52,석유제품 운반선,03,적하,KRKUV,군산,KRKUV,군산,KRKUV,군산,KRKUV,군산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,45,111002,두라7,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,43,088443,이에스 로즈,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,1,HZKR,YAQUT,SA,사우디아라비아,52,석유제품 운반선,02,양하,SGSIN,SINGAPORE,SGSIN,SINGAPORE,CNHUH,HUANGHUA PT,CNHUH,HUANGHUA PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,8,D5DN6,CORAL PALMATA,LR,라이베리아,55,LPG 운반선,03,적하,CNQDG,QINGDAO PT,CNQDG,QINGDAO PT,CNGLE,GULEI,CNGLE,GULEI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,20,161064,우석호,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,1,VRMJ4,GAS EMERALD,HK,홍콩,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,CNNKG,NANJING,CNNKG,NANJING,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,7,BOFY7,ZHAO YUAN,CN,중국,55,LPG 운반선,03,적하,CNYTG,YANTAI PT,CNYTG,YANTAI PT,CNDFE,DAFENG,CNDFE,DAFENG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,1,V7A6629,LUCKY FEB,MH,마샬 제도,51,원유운반선,03,적하,USHNL,HONOLULU,USHNL,HONOLULU,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,온산항
+300,대산,2026,8,190025,케이 가스,KR,대한민국,55,LPG 운반선,03,적하,KRINC,인천,KRINC,인천,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,8,DSME,우림 7,KR,대한민국,52,석유제품 운반선,03,적하,CNFZG,FUZHOU PT,CNFZG,FUZHOU PT,CNJIX,JIAXING,CNJIX,JIAXING,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,1,3FTB7,GOLDEN PROCYON,PA,파나마,53,케미칼 운반선,03,적하,CNTNG,TIANJIN PT,CNTNG,TIANJIN PT,CNCJG,CAOJING,CNCJG,CAOJING,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,온산항
+300,대산,2026,17,PCPA,CORAL ALICIA,NL,네덜란드,55,LPG 운반선,03,적하,CNQDG,QINGDAO PT,CNQDG,QINGDAO PT,CNQDG,QINGDAO PT,CNQDG,QINGDAO PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,17,V7AB3,엠에쓰 드림,MH,마샬 제도,53,케미칼 운반선,03,적하,CNZHE,ZHENJIANG,CNZHE,ZHENJIANG,CNCGS,CHANGSHU PT,CNCGS,CHANGSHU PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,온산항
+300,대산,2026,5,PBUC,CORAL ACTINIA,NL,네덜란드,55,LPG 운반선,03,적하,CNCZX,CHANGZHOU,CNCZX,CHANGZHOU,CNYIZ,YIZHENG,CNYIZ,YIZHENG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,29,130095,스카이로얄,KR,대한민국,53,케미칼 운반선,03,적하,KRYOS,여수,KRYOS,여수,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,2,D8HX,BS NGHI SON,KR,대한민국,53,케미칼 운반선,03,적하,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,CNZOS,ZHOUSHAN,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,False,온산항
+300,대산,2026,10,151802,광성호,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,1,D8VO,WOOJIN KELLY,KR,대한민국,52,석유제품 운반선,02,양하,MYBTU,"BINTULU, SARAWAK",MYBTU,"BINTULU, SARAWAK",KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,4,9LU2239,EVA PL,SL,시에라 리온,21,산물선(벌크선),02,양하,RUNJK,NAKHODKA,RUNJK,NAKHODKA,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,온산항
+300,대산,2026,5,D7TJ,코리아 빅토리,KR,대한민국,53,케미칼 운반선,03,적하,KRINC,인천,KRINC,인천,CNYAT,YANTAI,CNYAT,YANTAI,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,7,BPNT4,TONG ZHOU 6,CN,중국,55,LPG 운반선,03,적하,CNZHE,ZHENJIANG,CNZHE,ZHENJIANG,OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,57,221827,서해제일1호,KR,대한민국,69,기타 예선,03,적하,KRINC,인천,KRPTK,평택.당진,KRPTK,평택.당진,KRTSN,대산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,온산항
+300,대산,2026,36,D8BU,포천 카렌,KR,대한민국,53,케미칼 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,6,D8MP,엠에스피스,KR,대한민국,55,LPG 운반선,03,적하,JPTKY,TOKUYAMA,JPTKY,TOKUYAMA,JPTKY,TOKUYAMA,JPTKY,TOKUYAMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,33,160014,범 강,KR,대한민국,52,석유제품 운반선,03,적하,KRKUV,군산,KRKUV,군산,KRCHA,제주,KRCHA,제주,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,19,300KTSRED,케이티에스 레드,KR,대한민국,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,13,D7VU,오션가스호,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,44,088443,이에스 로즈,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,43,150012,15선영호,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRPTK,평택.당진,KRPTK,평택.당진,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,8,DSRP5,레이디가스,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,1,D5OF7,SINGAPORE ENERGY,LR,라이베리아,51,원유운반선,02,양하,SGSIN,SINGAPORE,SGSIN,SINGAPORE,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,온산항
+300,대산,2026,1,3E3413,STENA CONVOY,PA,파나마,52,석유제품 운반선,03,적하,NZNPL,NEW PLYMOUTH,NZNPL,NEW PLYMOUTH,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,18,241809,용천,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,8,DSQI3,우림 드라곤 7호,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,42,151810,아름호,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,7,D7LQ,제3에스제이가스호,KR,대한민국,55,LPG 운반선,99,기타,KRYOC,여천항,KRYOC,여천항,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,11,ICR211804,민성 11,KR,대한민국,59,기타 유조선,02,양하,KRINC,인천,KRTJI,당진,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타화물선,False,True,온산항
+300,대산,2026,20,D7UZ,308 HYODONG CHEMI,KR,대한민국,52,석유제품 운반선,02,양하,KRUSN,울산,KRUSN,울산,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,47,D7NF,두라 스타,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,15,D7BB,제이앤 카멜리아,KR,대한민국,52,석유제품 운반선,03,적하,KRPTK,평택.당진,KRPTK,평택.당진,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,1,3E8514,리치 시,PA,파나마,39,일반화물선,02,양하,CNTAZ,TAIZHOU PT,KRYOS,여수,CNDDG,DANDONG,CNDDG,DANDONG,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,False,온산항
+300,대산,2026,2,D7WL,제2아시안 파이오니어,KR,대한민국,53,케미칼 운반선,03,적하,KRPTK,평택.당진,KRPTK,평택.당진,SGSIN,SINGAPORE,SGSIN,SINGAPORE,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,46,111002,두라7,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,5,D7MW,제7에스제이가스호,KR,대한민국,55,LPG 운반선,03,적하,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,JPMIZ,MIZUSHIMA,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,4,9V2088,BUENA FORTUNA,SG,싱가포르,55,LPG 운반선,03,적하,CNLYG,LIANYUNGANG,CNLYG,LIANYUNGANG,OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,19,6YXV7,ZHONG SHENG TUO HAI,JM,자메이카,41,풀컨테이너선,01,양적하,KRINC,인천,KRINC,인천,CNNBG,NINGBO PT,CNSHG,SHANGHAI PT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,온산항
+300,대산,2026,21,161064,우석호,KR,대한민국,52,석유제품 운반선,03,적하,KRINC,인천,KRINC,인천,KRYOS,여수,KRYOS,여수,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,39,210019,동수1,KR,대한민국,52,석유제품 운반선,03,적하,KRMOK,목포,KRMOK,목포,KRMOK,목포,KRMOK,목포,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,11,151802,광성호,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRINC,인천,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,33,DSR217803,대진호,KR,대한민국,93,급유선,08,급유,KRTSN,대산,KRPTK,평택.당진,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,26,241802,상금,KR,대한민국,52,석유제품 운반선,02,양하,KRMOK,목포,KRINC,인천,KRINC,인천,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,28,121835,해원호,KR,대한민국,93,급유선,02,양하,KRINC,인천,KRINC,인천,KRPTK,평택.당진,KRINC,인천,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,부선,False,True,온산항
+300,대산,2026,37,D8BU,포천 카렌,KR,대한민국,53,케미칼 운반선,03,적하,KRINC,인천,KRINC,인천,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,17,DSEZ7,마린가스,KR,대한민국,55,LPG 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,KRYOC,여천항,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,True,온산항
+300,대산,2026,1,V7LN4,GALAXY GLOBE,MH,마샬 제도,21,산물선(벌크선),99,기타,KRINC,인천,KRINC,인천,OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,기타/불명,False,True,온산항
+300,대산,2026,1,9V6090,HAFNIA THALASSA,SG,싱가포르,51,원유운반선,02,양하,AUDAM,DAMPIER,AUDAM,DAMPIER,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,온산항
+300,대산,2026,2,BURS,CHANG HANG ZUAN SHI,CN,중국,52,석유제품 운반선,02,양하,JPYKK,YOKKAICHI,JPYKK,YOKKAICHI,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,False,온산항
+300,대산,2026,44,180020,두라 5,KR,대한민국,52,석유제품 운반선,03,적하,KRPUS,부산,KRPUS,부산,KRPUS,부산,KRPUS,부산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,44,180010,두라스카이,KR,대한민국,52,석유제품 운반선,03,적하,KRKUV,군산,KRKUV,군산,KRKUV,군산,KRKUV,군산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,28,D7IE,에프씨 델라,KR,대한민국,53,케미칼 운반선,03,적하,KRUSN,울산,KRUSN,울산,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,25,250025,선 프린세스,KR,대한민국,53,케미칼 운반선,03,적하,KRYOC,여천항,KRYOC,여천항,KRUSN,울산,KRUSN,울산,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,목재선,False,True,온산항
+300,대산,2026,2,9V6434,PROTEUS JESSICA,SG,싱가포르,51,원유운반선,02,양하,AUASB,ASHBURTON,AUASB,ASHBURTON,OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,일반화물선,False,False,온산항
+300,대산,2026,1,V7QV9,SILVER ETREMA,MH,마샬 제도,52,석유제품 운반선,03,적하,KRUSN,울산,KRUSN,울산,,,,,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항
+300,대산,2026,6,CQ2859,GASCHEM CARIBIC,PT,포르투갈,55,LPG 운반선,03,적하,CNTSN,TIANJIN,CNTSN,TIANJIN,OCZZZ,OCEAN DISTRICT,OCZZZ,OCEAN DISTRICT,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,LPG선,True,False,온산항
+300,대산,2026,19,150035,한유파이오니아,KR,대한민국,52,석유제품 운반선,02,양하,KRPTK,평택.당진,KRPTK,평택.당진,KRPTK,평택.당진,KRPTK,평택.당진,PORTMIS,VsslEtrynd5_Info5,2026-06-23 23:13:26.861128+00:00,OK,False,화물/시멘트선,False,True,온산항

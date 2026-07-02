@@ -1,0 +1,85 @@
+{
+  "response": {
+    "header": {
+      "resultCode": "00",
+      "resultMsg": "NORMAL SERVICE."
+    },
+    "body": {
+      "items": {
+        "item": [
+          {
+            "prtCd": "KRUSN",
+            "ptentYr": "2026",
+            "vyg": "001",
+            "callsgn": "D7ABC",
+            "vslKornNm": "한울호",
+            "vslTypeNm": "유조선",
+            "vslNtnltyCd": "KR",
+            "vslNtnltyNm": "대한민국",
+            "mrnNo": "MRN001",
+            "blNo": "BL001",
+            "msnNo": "MBL001",
+            "ioSeCd": "I",
+            "ioSeNm": "수입",
+            "fcltKornNm": "제1부두",
+            "cagSeNm": "액체",
+            "cagItemNm": "원유",
+            "dgUnCd": "1267",
+            "pkgTypeMpngNm": "벌크",
+            "unloadMthdNm": "펌프",
+            "volTonUnitNm": "KL",
+            "volTon": "50000",
+            "wghtTon": "48000",
+            "volSz": "50000",
+            "wghtSz": "48000",
+            "bulkVolSz": "50000",
+            "bulkWghtSz": "48000",
+            "conCnt": "0",
+            "podNm": "울산",
+            "polNm": "라스타누라",
+            "lastDestPrtNm": "울산",
+            "ptentDt": "2026-06-01 08:30:00",
+            "csclPrgrsSttsNm": "수입신고수리"
+          },
+          {
+            "prtCd": "KRUSN",
+            "ptentYr": "2026",
+            "vyg": "004",
+            "callsgn": "D7QQQ",
+            "vslKornNm": "케미호",
+            "vslTypeNm": "케미컬",
+            "vslNtnltyCd": "PA",
+            "vslNtnltyNm": "파나마",
+            "mrnNo": "MRN002",
+            "blNo": "BL002",
+            "msnNo": "MBL002",
+            "ioSeCd": "E",
+            "ioSeNm": "수출",
+            "fcltKornNm": "제3부두",
+            "cagSeNm": "액체",
+            "cagItemNm": "N/A",
+            "dgUnCd": "",
+            "pkgTypeMpngNm": "벌크",
+            "unloadMthdNm": "펌프",
+            "volTonUnitNm": "MT",
+            "volTon": "12000",
+            "wghtTon": "11800",
+            "volSz": "12000",
+            "wghtSz": "11800",
+            "bulkVolSz": "12000",
+            "bulkWghtSz": "11800",
+            "conCnt": "0",
+            "podNm": "싱가포르",
+            "polNm": "울산",
+            "lastDestPrtNm": "싱가포르",
+            "ptentDt": "2026-06-06 10:00:00",
+            "csclPrgrsSttsNm": "수출신고수리"
+          }
+        ]
+      },
+      "numOfRows": 2,
+      "pageNo": 1,
+      "totalCount": 2
+    }
+  }
+}
