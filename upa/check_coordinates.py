@@ -3,17 +3,17 @@
 울산항 좌표 범위(bbox) 진단 스크립트
 
 선박위치/부두/정박지 staging 의 실제 좌표 분포를 출력하여,
-공통 기준의 울산항 bbox(common.py 의 ULSAN_* 상수)가 적절한지 팀이 판단하도록 돕는다.
+공통 기준의 울산항 bbox(common_preprocessing.py 의 ULSAN_* 상수)가 적절한지 팀이 판단하도록 돕는다.
 
-주의: bbox 상수는 3팀 공통(common.py)이므로 변경은 팀 합의 후 함께 수정한다.
-실행: python -m backend.preprocessing.check_coordinates
+주의: bbox 상수는 3팀 공통(common_preprocessing.py)이므로 변경은 팀 합의 후 함께 수정한다.
+실행: python -m data_pipeline.upa.check_coordinates
 """
 import glob
 import os
 
 import pandas as pd
 
-from .common import (
+from ..common_preprocessing import (
     ULSAN_LAT_MIN, ULSAN_LAT_MAX, ULSAN_LON_MIN, ULSAN_LON_MAX,
 )
 

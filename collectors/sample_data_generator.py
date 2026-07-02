@@ -1,11 +1,13 @@
 import os
 import json
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 def main():
     # 저장 경로 설정
-    raw_dir = r"C:\Users\user\.gemini\antigravity-ide\scratch\ulsan_port_control\data\raw\ais"
+    raw_dir = os.path.join(BASE_DIR, "data", "raw", "ais")
     os.makedirs(raw_dir, exist_ok=True)
-    
+
     # 1. 가상 AIS 위치 데이터 (Dynamic)
     # 정상 범위: Lat 35.30 ~ 35.58, Lon 129.18 ~ 129.52
     position_data = [

@@ -76,7 +76,7 @@ flowchart TD
 ## 4. 공통 데이터 전처리 가이드라인 준수 현황
 
 프로젝트 공통 가이드라인을 100% 준수하여 구현했습니다:
-1. **공통 전처리 코드 준수**: `src/common_utils.py`를 공식 공통 전처리 소스코드와 동일하게 덮어써서 동기화했습니다.
+1. **공통 전처리 코드 준수**: `data_pipeline/common_preprocessing.py`(팀 통합 정본)를 그대로 import하여 사용합니다.
 2. **컬럼명 기준**: `mmsi`, `latitude`, `longitude`, `sog`, `cog`, `nav_status_code` 등 표준 snake_case 통일 적용했습니다.
 3. **공통 메타컬럼 탑재**: `source_system`, `source_table`, `collected_at_utc`, `quality_flag`, `is_synthetic` 컬럼 완벽 탑재했습니다.
 4. **좌표 범위 검증**: 1차 관제 범위 밖의 데이터는 `quality_flag = 'OUT_OF_ULSAN_BBOX'`로 정상 라벨링 처리했습니다.
@@ -89,21 +89,21 @@ flowchart TD
 ### 1단계: 수집 (실시간 또는 모의 수집)
 ```bash
 # 실시간 수집 실행 시 (예: 5분간 수집)
-python utils/collect_real_ais.py --minutes 5
+python data_pipeline/collectors/ais_collector.py --minutes 5
 ```
 
 ### 2단계: 전처리 실행 (순서대로 실행)
 ```bash
 # 1. PORT-MIS 선박 입출항 전처리 (호출부호 매핑 참조용)
-python src/preprocess_portmis.py
+python data_pipeline/preprocessors/portmis_preprocessor.py
 
 # 2. AIS 제원 및 위치 전처리 (순서 보정 완료됨)
-python src/preprocess_ais.py
+python data_pipeline/preprocessors/ais_preprocessor.py
 ```
 
 ### 3단계: staging 결과물 통계 검증
 ```bash
-python check_staging.py
+python data_pipeline/checks/check_staging.py
 ```
 검증 성공 시, 전처리된 최종 제출용 파일(`ais_vessel_position_stg.csv`, `ais_vessel_static_stg.csv`)이 **바탕 화면(Desktop)**에 자동으로 저장 및 복사됩니다.
 
@@ -150,22 +150,26 @@ python check_staging.py
 ### 6-4. 프로젝트 디렉토리 구조
 
 ```
-ulsan_port_control/
-├── README_preprocessing.md          # 개발 보고서 (본 문서)
+smart-port-multi-agent/
 ├── requirements.txt                 # 패키지 의존성 (websockets, pandas, numpy)
 ├── .gitignore                       # Git 제외 규칙
-├── check_ais.py                     # AIS 원본 데이터 확인 스크립트
-├── check_staging.py                 # Staging 적재 검증 스크립트
 │
-├── src/                             # 전처리 소스코드
-│   ├── common_utils.py              # 공통 전처리 함수 (결측값·좌표·속도 검증 등)
-│   ├── preprocess_ais.py            # AIS 제원+위치 전처리 (PORT-MIS 조인 포함)
-│   └── preprocess_portmis.py        # PORT-MIS 입출항 전처리
-│
-├── utils/                           # 데이터 수집 유틸리티
-│   ├── collect_real_ais.py          # 실시간 AIS 웹소켓 수집기 (aisstream.io)
-│   ├── collect_portmis.py           # PORT-MIS API 수집기 (해양수산부)
-│   └── generate_sample_raw.py       # 모의 데이터 생성기 (테스트용)
+├── data_pipeline/
+│   ├── AIS_PORTMIS_PIPELINE.md      # 개발 보고서 (본 문서)
+│   ├── common_preprocessing.py      # 공통 전처리 함수 (결측값·좌표·속도 검증 등)
+│   │
+│   ├── collectors/                  # 데이터 수집 스크립트
+│   │   ├── ais_collector.py         # 실시간 AIS 웹소켓 수집기 (aisstream.io)
+│   │   ├── portmis_collector.py     # PORT-MIS API 수집기 (해양수산부)
+│   │   └── sample_data_generator.py # 모의 데이터 생성기 (테스트용)
+│   │
+│   ├── preprocessors/               # 전처리 소스코드
+│   │   ├── ais_preprocessor.py      # AIS 제원+위치 전처리 (PORT-MIS 조인 포함)
+│   │   └── portmis_preprocessor.py  # PORT-MIS 입출항 전처리
+│   │
+│   └── checks/                      # 검증 스크립트
+│       ├── check_ais.py             # AIS 원본 데이터 확인 스크립트
+│       └── check_staging.py         # Staging 적재 검증 스크립트
 │
 └── data/
     ├── raw/                         # 원본 수집 데이터 (GitHub 포함)
@@ -237,26 +241,26 @@ pip install websockets pandas numpy
 
 ### 8-2. API 인증 키 설정 (실시간 데이터 재수집 시 필요)
 1. [aisstream.io/apikeys](https://aisstream.io/apikeys)에서 발급받은 본인의 API Key를 준비합니다.
-2. `utils/collect_real_ais.py` 파일의 28라인 부근 `AISSTREAM_API_KEY` 변수에 해당 키값을 문자열로 입력해 둡니다.
+2. `data_pipeline/collectors/ais_collector.py` 파일의 28라인 부근 `AISSTREAM_API_KEY` 변수에 해당 키값을 문자열로 입력해 둡니다.
 
 ### 8-3. 파이프라인 실행 순서 (정밀한 대조를 위해 필수)
 실시간 위치 정합성과 호출부호 대조를 위해 아래 순서대로 터미널에서 구동해야 합니다.
 
 1. **PORT-MIS 데이터 전처리 가동**:
    ```bash
-   python src/preprocess_portmis.py
+   python data_pipeline/preprocessors/portmis_preprocessor.py
    ```
    * *결과*: `data/staging/portmis_vessel_stg.csv`가 생성되어 호출부호 대조 사전이 빌드됩니다.
 
 2. **AIS 데이터 전처리 가동**:
    ```bash
-   python src/preprocess_ais.py
+   python data_pipeline/preprocessors/ais_preprocessor.py
    ```
    * *결과*: 앞선 PORT-MIS 사전을 기반으로 동적 조인(Join)하여 `ais_vessel_static_stg.csv` 및 `ais_vessel_position_stg.csv`를 생성합니다.
 
 3. **최종 적재 검증 및 바탕화면 출력**:
    ```bash
-   python check_staging.py
+   python data_pipeline/checks/check_staging.py
    ```
    * *결과*: 최종 품질 플래그와 통계를 출력하고, 해당 실행 기기의 **바탕 화면(Desktop)**에 규칙에 맞춘 최종 결과 CSV 2종을 자동으로 복사해 줍니다.
 
@@ -297,7 +301,7 @@ pip install websockets pandas numpy
    * 터미널 세션이 닫혀도 가동이 유지되도록 아래 백그라운드 명령어를 통해 상시 구동합니다:
      ```bash
      # 세션이 끊겨도 백그라운드에서 영구 구동되도록 설정 (로그는 ais_run.log에 저장)
-     nohup python utils/collect_real_ais.py --minutes 525600 > ais_run.log 2>&1 &
+     nohup python data_pipeline/collectors/ais_collector.py --minutes 525600 > ais_run.log 2>&1 &
      ```
 
 2. **사내/연구실 상시 가동 데스크톱 활용**

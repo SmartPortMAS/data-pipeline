@@ -10,7 +10,7 @@
 실행:
   pip install requests apscheduler
   set UPA_SERVICE_KEY=발급키   (Windows: set / macOS,Linux: export)
-  python -m backend.preprocessing.upa_scheduler
+  python -m data_pipeline.upa.upa_scheduler
 """
 import os
 import datetime as dt

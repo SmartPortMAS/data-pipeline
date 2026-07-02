@@ -1,1 +1,1 @@
-backend/preprocessing/NOTION_UPA.md
+data_pipeline/UPA_NOTION.md

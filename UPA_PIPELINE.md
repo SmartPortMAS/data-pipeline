@@ -8,7 +8,7 @@ API 6종 전처리 모듈이다. 최종 staging 결과물은 **공통 컬럼명(
 
 | 파일 | 역할 |
 | --- | --- |
-| `common.py` | 기준 문서 7장 공통 전처리 함수 (3팀 공용) |
+| `../common_preprocessing.py` | 기준 문서 7장 공통 전처리 함수 (3팀 공용, `data_pipeline/` 루트에 위치) |
 | `upa_config.py` | API별 컬럼 매핑 / 숫자형 / 시간 / 기본키 / staging 파일명 설정 |
 | `upa_preprocess.py` | raw 로더 + API별 파이프라인 + 실행 엔트리 |
 | `upa_collector.py` | **Open API 수집기** (serviceKey로 호출 → raw 저장 → 전처리) |
@@ -18,18 +18,18 @@ API 6종 전처리 모듈이다. 최종 staging 결과물은 **공통 컬럼명(
 ## 0. 빠른 시작 (실제 데이터 수집 → 전처리)
 
 ```bash
-pip install -r backend/requirements.txt
+pip install -r data_pipeline/requirements.txt
 
 # 발급키 등록 (.env.example 참고). Windows PowerShell:
 $env:UPA_SERVICE_KEY="발급받은_Decoding_키"
 # macOS/Linux:  export UPA_SERVICE_KEY="발급받은_Decoding_키"
 
 # 수집 + 전처리 한 번에 실행
-python -m backend.preprocessing.upa_collector
+python -m data_pipeline.upa.upa_collector
 # -> data/raw/upa/*.json 저장, data/staging/*.csv 생성
 
 # 주기적 자동 수집 (10분/일단위 분리)
-python -m backend.preprocessing.upa_scheduler
+python -m data_pipeline.upa.upa_scheduler
 ```
 
 > ⚠️ `serviceKey`는 공공데이터포털 마이페이지의 **'일반 인증키(Decoding)'** 값을
@@ -58,14 +58,14 @@ python -m backend.preprocessing.upa_scheduler
 #    예: data/raw/upa/upa_vessel_position_raw.json
 
 # 2) 전체 파이프라인 실행
-python -m backend.preprocessing.upa_preprocess
+python -m data_pipeline.upa.upa_preprocess
 # -> data/staging/*.csv 생성
 ```
 
 코드에서 개별 호출:
 
 ```python
-from backend.preprocessing import upa_preprocess as upa
+from data_pipeline.upa import upa_preprocess as upa
 
 # 단일 API
 upa.run_pipeline("vessel_position", ["data/raw/upa/upa_vessel_position_raw.json"])

@@ -15,7 +15,7 @@
     2) PGHOST / PGPORT / PGUSER / PGPASSWORD / PGDATABASE
 
 실행:
-  python -m backend.preprocessing.upa_loader
+  python -m data_pipeline.upa.upa_loader
 """
 import os
 import glob

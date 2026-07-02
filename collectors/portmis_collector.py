@@ -1,12 +1,12 @@
 """
-collect_portmis.py
+portmis_collector.py
 ==================
 해양수산부 선박운항정보 API (PORT-MIS, VsslEtrynd5)를 활용하여
 울산항(prtAgCd=820) + 온산항(prtAgCd=300) 입출항 기록을 수집하고
 data/raw/portmis/ 에 저장합니다.
 
 사용법:
-    python utils/collect_portmis.py [--start YYYYMMDD] [--end YYYYMMDD]
+    python data_pipeline/collectors/portmis_collector.py [--start YYYYMMDD] [--end YYYYMMDD]
 
     --start : 조회 시작일. 기본값: 오늘
     --end   : 조회 종료일. 기본값: 오늘
@@ -57,7 +57,7 @@ PORT_CODES = {
     "300": "온산항",
 }
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW_PORTMIS_DIR = os.path.join(BASE_DIR, "data", "raw", "portmis")
 
 MAX_ROWS_PER_PAGE = 100  # API 최대 허용 건수 (페이징)

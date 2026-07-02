@@ -4,14 +4,10 @@ import json
 import pandas as pd
 import numpy as np
 
-# common_utils.py가 위치한 src 폴더를 path에 추가하여 모듈을 가져올 수 있도록 설정
-src_dir = os.path.dirname(os.path.abspath(__file__))
-if src_dir not in sys.path:
-    sys.path.append(src_dir)
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+import common_preprocessing as cu
 
-import common_utils as cu
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 STAGING_DIR = os.path.join(BASE_DIR, "data", "staging")
 
 def preprocess_ais_position():
@@ -20,7 +16,7 @@ def preprocess_ais_position():
     
     # 1. raw 데이터 로드 (모든 ais_position_*.json 파일 탐색 및 병합)
     import glob
-    raw_ais_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "raw", "ais")
+    raw_ais_dir = os.path.join(BASE_DIR, "data", "raw", "ais")
     raw_files = sorted(glob.glob(os.path.join(raw_ais_dir, "ais_position_*.json")), reverse=True)
     if not raw_files:
         print(f"처리할 AIS 위치 파일을 찾을 수 없습니다.")
@@ -133,7 +129,7 @@ def preprocess_ais_static():
     
     # 1. raw 데이터 로드 (모든 ais_static_*.json 파일 탐색 및 병합)
     import glob
-    raw_ais_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "raw", "ais")
+    raw_ais_dir = os.path.join(BASE_DIR, "data", "raw", "ais")
     raw_files = sorted(glob.glob(os.path.join(raw_ais_dir, "ais_static_*.json")), reverse=True)
     if not raw_files:
         print(f"처리할 AIS 제원 파일을 찾을 수 없습니다.")

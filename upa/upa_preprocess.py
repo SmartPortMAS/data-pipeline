@@ -21,7 +21,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from . import common
+from .. import common_preprocessing as common
 from . import upa_config as cfg
 
 

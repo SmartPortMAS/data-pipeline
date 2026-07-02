@@ -1,10 +1,10 @@
 """
-collect_real_ais.py
+ais_collector.py
 ===================
 울산항 실제 AIS 위치/제원 데이터 수집 스크립트 (aisstream.io 기반)
 
 사용법:
-    python utils/collect_real_ais.py [--minutes 5]
+    python data_pipeline/collectors/ais_collector.py [--minutes 5]
 
     --minutes : 수집 시간(분). 기본값 5분.
     Ctrl+C로 조기 종료 가능. 종료 시 그때까지 수집된 데이터를 저장합니다.
@@ -36,7 +36,7 @@ ULSAN_BBOX = [[34.00, 128.00], [36.50, 130.50]]
 ULSAN_DEST_KEYWORDS = ["ULSAN", "KRULS", "KRUSN", "KR USN", "USN", "KR ULS"]
 
 # 저장 경로
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW_AIS_DIR = os.path.join(BASE_DIR, "data", "raw", "ais")
 
 

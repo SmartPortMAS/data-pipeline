@@ -36,14 +36,10 @@ import json
 import pandas as pd
 import numpy as np
 
-# common_utils.py 경로 추가
-src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
-if src_dir not in sys.path:
-    sys.path.append(src_dir)
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+import common_preprocessing as cu
 
-import common_utils as cu
-
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RAW_PORTMIS_DIR = os.path.join(BASE_DIR, "data", "raw", "portmis")
 STAGING_DIR = os.path.join(BASE_DIR, "data", "staging")
 
