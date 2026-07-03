@@ -47,8 +47,15 @@ import os
 import datetime
 import argparse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ----- 설정 -----
-SERVICE_KEY = "219d0702262c964cf52fac4bd6a84fc313bfba3026af157bcbd6ba82c8f0010a"
+# backend/.env 의 PORT_MIS_API_KEY 와 같은 변수명(프로젝트 공통 컨벤션)
+if not os.getenv("PORT_MIS_API_KEY"):
+    raise RuntimeError("PORT_MIS_API_KEY가 없습니다. .env에 설정하세요.")
+SERVICE_KEY = os.environ["PORT_MIS_API_KEY"]
 BASE_URL = "http://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
 
 # 울산항(820) + 온산항(300) 모두 조회

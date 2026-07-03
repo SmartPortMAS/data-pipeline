@@ -24,8 +24,14 @@ import sys
 import datetime
 import argparse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ----- 설정 -----
-AISSTREAM_API_KEY = "3460701b4937d1fe1d2e0c4f3562fdd04c9d592b"
+if not os.getenv("AISSTREAM_API_KEY"):
+    raise RuntimeError("AISSTREAM_API_KEY가 없습니다. .env에 설정하세요.")
+AISSTREAM_API_KEY = os.environ["AISSTREAM_API_KEY"]
 
 # 울산항 인근 해상 광역 Bounding Box (울산 향하는 항해 중인 선박 포함)
 # [[남서위도, 남서경도], [북동위도, 북동경도]]

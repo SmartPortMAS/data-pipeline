@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+
+# 수집된 데이터 산출물(raw/staging/mart)은 실행할 때마다 계속 생기고 커지므로
+# 레포에 올리지 않는다. 폴더 구조만 유지하려면 .gitkeep은 예외로 둔다.
+data/raw/*
+data/staging/*
+data/mart/*
+!**/.gitkeep
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/

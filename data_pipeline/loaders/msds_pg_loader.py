@@ -1,5 +1,5 @@
 """
-MSDS PostgreSQL 적재 모듈 — JSONB 기반 마스터 스테이징 DB
+MSDS PostgreSQL 적재 모듈 — JSONB 기반 마스터 DB
 ==========================================================
 파이프라인 위치: [수집기] → raw JSON → [이 모듈] → PostgreSQL
 
@@ -10,11 +10,19 @@ MSDS PostgreSQL 적재 모듈 — JSONB 기반 마스터 스테이징 DB
 - ON CONFLICT (chem_id) DO UPDATE 로 재실행 시 멱등성(Idempotency) 보장.
 - 팀 공통 메타데이터 규칙 (common_preprocessing.py §7) 준수.
 
+스키마 소유권:
+- msds_chemical 테이블/인덱스는 backend(Alembic, backend/alembic/versions/)가 소유한다.
+  backend가 동일 테이블에 실시간 조회+적재(lazy fetch-and-cache)도 하기 때문에
+  스키마를 두 곳에서 관리하면 드리프트가 생긴다.
+- 이 모듈은 테이블이 이미 존재한다고 가정하고 insert(upsert)만 수행한다.
+  로컬 개발 등에서 백엔드 마이그레이션을 먼저 적용해야 한다:
+      cd backend && alembic upgrade head
+
 외부 의존 라이브러리:
     pip install psycopg2-binary python-dotenv
 
-환경변수 (.env 또는 OS 환경변수):
-    PG_HOST, PG_PORT, PG_DBNAME, PG_USER, PG_PASSWORD
+환경변수 (.env 또는 OS 환경변수, 기본값 없음 — 미설정 시 에러):
+    POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
 """
 
 import glob
@@ -41,13 +49,19 @@ logger = logging.getLogger("msds_pg_loader")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DB 접속 설정 — 환경변수로 분리하여 프로덕션 배포 시 secrets manager 연동 가능
+# 기본값 없음: 하드코딩된 자격증명 fallback으로 조용히 엉뚱한 DB에 붙는 걸 방지.
 # ─────────────────────────────────────────────────────────────────────────────
+_REQUIRED_PG_VARS = ["POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD"]
+_missing = [k for k in _REQUIRED_PG_VARS if not os.getenv(k)]
+if _missing:
+    raise RuntimeError(f"DB 접속정보가 없습니다. .env에 설정하세요: {', '.join(_missing)}")
+
 PG_CONFIG: dict = {
-    "host":            os.getenv("PG_HOST",     "localhost"),
-    "port":            int(os.getenv("PG_PORT", "5432")),
-    "dbname":          os.getenv("PG_DBNAME",   "smartport"),
-    "user":            os.getenv("PG_USER",     "postgres"),
-    "password":        os.getenv("PG_PASSWORD", ""),
+    "host":            os.environ["POSTGRES_HOST"],
+    "port":            int(os.environ["POSTGRES_PORT"]),
+    "dbname":          os.environ["POSTGRES_DB"],
+    "user":            os.environ["POSTGRES_USER"],
+    "password":        os.environ["POSTGRES_PASSWORD"],
     "connect_timeout": 10,
     "options":         "-c search_path=public",  # 스키마 명시
 }
@@ -67,68 +81,9 @@ SECTION_KEYS: list[str] = [f"detail{i:02d}" for i in range(1, 17)]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DDL 정의 — 테이블, 제약조건, 인덱스
-# ─────────────────────────────────────────────────────────────────────────────
-_DDL_CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS staging_msds_chemical (
-    -- ── 기본 식별자 컬럼 ──────────────────────────────────────────────────
-    chem_id          VARCHAR(20)   NOT NULL,     -- 안전보건공단 화학물질 고유 ID (PK)
-    cas_no           VARCHAR(50),                 -- CAS 등록번호 (부분 UNIQUE 인덱스)
-    un_no            VARCHAR(20),                 -- UN 번호 (위험물 운송 코드)
-    name_ko          VARCHAR(500),                -- 한국어 화학물질명
-    name_en          VARCHAR(500),                -- 영문 화학물질명
-
-    -- ── 팀 공통 메타데이터 컬럼 (§7 규칙 준수) ────────────────────────────
-    source_system    VARCHAR(50)   NOT NULL DEFAULT 'KOSHA_MSDS_API',
-    source_table     VARCHAR(50)   NOT NULL DEFAULT 'getChemDetail',
-    collected_at_utc TIMESTAMPTZ   NOT NULL,      -- 수집 시각 (UTC)
-    quality_flag     VARCHAR(20)   NOT NULL DEFAULT 'OK',  -- OK | MISSING_KEY
-    is_synthetic     BOOLEAN       NOT NULL DEFAULT FALSE,
-
-    -- ── MSDS 원본 섹션 데이터 (JSONB) ──────────────────────────────────────
-    -- detail01 ~ detail16 전체 구조체를 유실 없이 보존
-    -- GIN 인덱스로 내부 키·값 full-text 검색 지원
-    msds_payload     JSONB         NOT NULL,
-
-    -- ── 제약조건 ────────────────────────────────────────────────────────────
-    CONSTRAINT pk_staging_msds_chem_id PRIMARY KEY (chem_id)
-);
-"""
-
-# cas_no가 있는 경우에만 UNIQUE 보장 (NULL/빈 값 제외하는 부분 인덱스)
-_DDL_IDX_CAS = """
-CREATE UNIQUE INDEX IF NOT EXISTS idx_stg_msds_cas_no
-    ON staging_msds_chemical (cas_no)
-    WHERE cas_no IS NOT NULL AND cas_no <> '';
-"""
-
-# JSONB 내부 키·값 검색을 위한 GIN 인덱스 (msdsItemCode, itemDetail 조회 등)
-_DDL_IDX_GIN = """
-CREATE INDEX IF NOT EXISTS idx_stg_msds_payload_gin
-    ON staging_msds_chemical USING GIN (msds_payload);
-"""
-
-# 적재 시각 범위 조회 최적화 (증분 수집 시 유용)
-_DDL_IDX_COLLECTED = """
-CREATE INDEX IF NOT EXISTS idx_stg_msds_collected_at
-    ON staging_msds_chemical (collected_at_utc DESC);
-"""
-
-
-def ensure_table_exists(conn: psycopg2.extensions.connection) -> None:
-    """
-    staging_msds_chemical 테이블과 필요한 인덱스를 멱등성 있게 생성한다.
-    이미 존재하는 경우 IF NOT EXISTS 구문으로 안전하게 스킵된다.
-    """
-    with conn.cursor() as cur:
-        cur.execute(_DDL_CREATE_TABLE)
-        cur.execute(_DDL_IDX_CAS)
-        cur.execute(_DDL_IDX_GIN)
-        cur.execute(_DDL_IDX_COLLECTED)
-    conn.commit()
-    logger.info("테이블/인덱스 확인 완료: staging_msds_chemical")
-
-
+# 테이블/인덱스 정의는 backend(Alembic)가 소유한다.
+# backend/alembic/versions/0001_create_msds_chemical.py 참고.
+# 이 모듈은 스키마를 생성하지 않고 insert(upsert)만 수행한다.
 # ─────────────────────────────────────────────────────────────────────────────
 # 레코드 변환 — raw dict → PostgreSQL 행(row) 매핑
 # ─────────────────────────────────────────────────────────────────────────────
@@ -196,7 +151,7 @@ def _build_row(record: dict) -> dict:
 # Upsert SQL — ON CONFLICT로 재실행 멱등성 보장
 # ─────────────────────────────────────────────────────────────────────────────
 _UPSERT_SQL = """
-INSERT INTO staging_msds_chemical (
+INSERT INTO msds_chemical (
     chem_id, cas_no, un_no, name_ko, name_en,
     source_system, source_table, collected_at_utc,
     quality_flag, is_synthetic, msds_payload
@@ -267,7 +222,9 @@ def upsert_to_postgresql(
 
 def run_pg_load(raw_json_path: str | None = None) -> None:
     """
-    raw JSON 파일을 읽어 staging_msds_chemical 테이블에 배치 Upsert를 수행한다.
+    raw JSON 파일을 읽어 msds_chemical 테이블에 배치 Upsert를 수행한다.
+    테이블/인덱스는 backend(Alembic)가 소유하므로, 이 함수 실행 전에
+    backend에서 `alembic upgrade head`가 적용되어 있어야 한다.
 
     Args:
         raw_json_path:
@@ -298,14 +255,12 @@ def run_pg_load(raw_json_path: str | None = None) -> None:
         logger.warning("적재할 레코드가 없습니다.")
         return
 
-    # ── 2. PostgreSQL 연결 및 스키마 보장 ─────────────────────────────────
+    # ── 2. PostgreSQL 연결 (테이블은 backend Alembic이 이미 생성해 둔 상태여야 함) ──
     conn = psycopg2.connect(**PG_CONFIG)
     conn.autocommit = False  # 명시적 트랜잭션 제어
     logger.info("PostgreSQL 연결 완료: %s:%s/%s", PG_CONFIG["host"], PG_CONFIG["port"], PG_CONFIG["dbname"])
 
     try:
-        ensure_table_exists(conn)
-
         success_cnt = 0
         skip_cnt    = 0
         error_cnt   = 0
