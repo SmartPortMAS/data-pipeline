@@ -28,7 +28,9 @@ import time
 import datetime as dt
 
 import requests
+from dotenv import load_dotenv
 
+load_dotenv()
 
 BASE_URL = "http://apis.data.go.kr/B551938"
 RAW_DIR = "data/raw/upa"

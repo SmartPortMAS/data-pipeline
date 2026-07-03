@@ -12,7 +12,7 @@ MSDS Neo4j 이관 모듈 — PostgreSQL JSONB → 지식 그래프 (Knowledge Gr
 │  (:HazardClass {name})    (:IncompatibleMaterial {name})                 │
 │                                                                           │
 │  데이터 출처:                                                             │
-│  - Chemical     ← staging_msds_chemical 기본 식별자 컬럼                 │
+│  - Chemical     ← msds_chemical 기본 식별자 컬럼                        │
 │  - HazardClass  ← msds_payload.detail02 (B02: GHS 분류)                 │
 │  - Incompatible ← msds_payload.detail10 (J코드 텍스트 키워드 추출)       │
 └──────────────────────────────────────────────────────────────────────────┘
@@ -26,8 +26,8 @@ MSDS Neo4j 이관 모듈 — PostgreSQL JSONB → 지식 그래프 (Knowledge Gr
 외부 의존 라이브러리:
     pip install psycopg2-binary neo4j python-dotenv
 
-환경변수 (.env 또는 OS 환경변수):
-    PG_HOST, PG_PORT, PG_DBNAME, PG_USER, PG_PASSWORD
+환경변수 (.env 또는 OS 환경변수, 기본값 없음 — 미설정 시 에러):
+    POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
     NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, NEO4J_DATABASE
 """
 
@@ -55,22 +55,31 @@ logging.basicConfig(
 logger = logging.getLogger("msds_neo4j_loader")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DB 접속 설정 — 환경변수로 분리
+# DB 접속 설정 — 환경변수로 분리. 기본값 없음(미설정 시 에러) — 하드코딩된
+# 자격증명 fallback으로 조용히 엉뚱한 DB에 붙는 걸 방지.
 # ─────────────────────────────────────────────────────────────────────────────
+_REQUIRED_VARS = [
+    "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "POSTGRES_USER", "POSTGRES_PASSWORD",
+    "NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "NEO4J_DATABASE",
+]
+_missing = [k for k in _REQUIRED_VARS if not os.getenv(k)]
+if _missing:
+    raise RuntimeError(f"DB 접속정보가 없습니다. .env에 설정하세요: {', '.join(_missing)}")
+
 PG_CONFIG: dict = {
-    "host":            os.getenv("PG_HOST",     "localhost"),
-    "port":            int(os.getenv("PG_PORT", "5432")),
-    "dbname":          os.getenv("PG_DBNAME",   "smartport"),
-    "user":            os.getenv("PG_USER",     "postgres"),
-    "password":        os.getenv("PG_PASSWORD", ""),
+    "host":            os.environ["POSTGRES_HOST"],
+    "port":            int(os.environ["POSTGRES_PORT"]),
+    "dbname":          os.environ["POSTGRES_DB"],
+    "user":            os.environ["POSTGRES_USER"],
+    "password":        os.environ["POSTGRES_PASSWORD"],
     "connect_timeout": 10,
     "options":         "-c search_path=public",
 }
 
-NEO4J_URI      = os.getenv("NEO4J_URI",      "bolt://localhost:7687")
-NEO4J_USER     = os.getenv("NEO4J_USER",     "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+NEO4J_URI      = os.environ["NEO4J_URI"]
+NEO4J_USER     = os.environ["NEO4J_USER"]
+NEO4J_PASSWORD = os.environ["NEO4J_PASSWORD"]
+NEO4J_DATABASE = os.environ["NEO4J_DATABASE"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 배치 사이즈 설정
@@ -544,7 +553,7 @@ def transfer_msds_to_neo4j(
     batch_size: int = NEO4J_BATCH_SIZE,
 ) -> None:
     """
-    PostgreSQL staging_msds_chemical 테이블의 전체 데이터를 Neo4j로 이관한다.
+    PostgreSQL msds_chemical 테이블의 전체 데이터를 Neo4j로 이관한다.
 
     메모리 효율을 위해 PostgreSQL 서버사이드 Named Cursor를 사용하여
     전체 결과를 한 번에 클라이언트 메모리에 올리지 않고 chunk 단위로 스트리밍한다.
@@ -563,7 +572,7 @@ def transfer_msds_to_neo4j(
             name_ko,
             name_en,
             msds_payload
-        FROM staging_msds_chemical
+        FROM msds_chemical
         WHERE quality_flag = 'OK'
         ORDER BY chem_id
     """
