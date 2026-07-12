@@ -135,15 +135,17 @@ def upsert_dataframe(
 def load_csv(engine: Engine, csv_path: str, table: str, unique_cols: list, auto_create: bool = True) -> int:
     df = pd.read_csv(csv_path)
     if df.empty:
-        print(f"[SKIP] {csv_path} 비어 있음")
+        print(f"[SKIP] {csv_path} empty")
         return 0
-    # _utc 컬럼을 datetime으로 파싱 — 문자열 그대로 두면 임시 테이블이 TEXT로
-    # 생성되어 Alembic이 TIMESTAMPTZ로 만든 실제 테이블과 타입이 안 맞아 upsert가 실패한다.
     for col in df.columns:
         if col.endswith("_utc"):
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
     if unique_cols == ["record_uid"]:
         df = add_record_uid(df)
+    else:
+        # batch dedup: same unique key twice in one INSERT
+        # causes ON CONFLICT DO UPDATE CardinalityViolation
+        df = df.drop_duplicates(subset=unique_cols, keep="last").reset_index(drop=True)
     n = upsert_dataframe(engine, table, df, unique_cols, auto_create)
     print(f"[OK] {os.path.basename(csv_path)} -> {table} ({n} rows upsert)")
     return n
