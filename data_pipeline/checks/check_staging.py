@@ -2,6 +2,7 @@ import pandas as pd
 
 df_pos = pd.read_csv('data/staging/ais_vessel_position_stg.csv', encoding='utf-8-sig')
 df_static = pd.read_csv('data/staging/ais_vessel_static_stg.csv', encoding='utf-8-sig')
+df_portmis = pd.read_csv('data/staging/portmis_vessel_stg.csv', encoding='utf-8-sig')
 
 print("=== AIS 위치 데이터 (ais_vessel_position_stg.csv) ===")
 print(f"총 레코드: {len(df_pos)}건")
@@ -27,3 +28,20 @@ if 'ulsan_bound' in df_static.columns:
     print(f"울산 향 (ulsan_bound=True): {len(ulsan)}건")
     if len(ulsan) > 0:
         print(ulsan[['mmsi', 'vessel_name', 'Destination']].to_string(index=False))
+
+print()
+print("=== PORT-MIS 입출항 데이터 (portmis_vessel_stg.csv) ===")
+print(f"총 레코드: {len(df_portmis)}건")
+print("quality_flag 분포:")
+print(df_portmis['quality_flag'].value_counts().to_string())
+print()
+print(f"호출부호(callsgn) 결측 (MISSING_KEY): {(df_portmis['quality_flag'] == 'MISSING_KEY').sum()}건")
+print()
+print("항만청(port_agency_label)별 건수:")
+if 'port_agency_label' in df_portmis.columns:
+    print(df_portmis['port_agency_label'].value_counts().to_string())
+else:
+    print("  port_agency_label 컬럼 없음")
+if 'is_liquid_cargo_vessel' in df_portmis.columns:
+    liquid = df_portmis[df_portmis['is_liquid_cargo_vessel'].astype(str).str.lower().eq('true')]
+    print(f"액체화물선 (is_liquid_cargo_vessel=True): {len(liquid)}건")
