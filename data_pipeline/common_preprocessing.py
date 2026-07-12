@@ -87,10 +87,15 @@ def parse_datetime_utc(df: pd.DataFrame, columns: list) -> pd.DataFrame:
     UTC 시간 파싱 함수
     (AISStream의 TimeUtc처럼 이미 UTC 기준인 시간을 datetime으로 변환)
     format="mixed": 행마다 형식이 달라도 추론, "Could not infer format" 경고 제거.
+    AISStream TimeUtc는 "... +0000 UTC" 접미사가 붙어 pd.to_datetime이 파싱하지
+    못하므로(NaT → MISSING_KEY 오탐) 문자열 컬럼은 접미사를 제거한 뒤 파싱한다.
     """
     df = df.copy()
     for col in columns:
         if col in df.columns:
+            if df[col].dtype == object or df[col].dtype.name in ('object', 'str', 'string'):
+                # '+0000 UTC' 접미사가 붙어 있는 경우 제거하여 pd.to_datetime이 올바르게 파싱하도록 처리
+                df[col] = df[col].astype(str).str.replace(r"\s*\+0000\s*UTC", "", regex=True)
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True, format="mixed")
     return df
 
@@ -254,3 +259,23 @@ def save_staging_csv(df: pd.DataFrame, output_path: str) -> None:
     """
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"[저장 완료] {output_path}  ({len(df):,}행)")
+
+
+def haversine_distance_nm(lat1, lon1, lat2, lon2):
+    """
+    두 위도/경도 좌표 간의 대원 거리(Great-Circle Distance)를 해리(Nautical Mile, NM) 단위로 계산합니다.
+    """
+    R = 3440.065
+
+    rad_lat1 = np.radians(lat1)
+    rad_lon1 = np.radians(lon1)
+    rad_lat2 = np.radians(lat2)
+    rad_lon2 = np.radians(lon2)
+
+    dlat = rad_lat2 - rad_lat1
+    dlon = rad_lon2 - rad_lon1
+
+    a = np.sin(dlat / 2.0)**2 + np.cos(rad_lat1) * np.cos(rad_lat2) * np.sin(dlon / 2.0)**2
+    c = 2.0 * np.arcsin(np.sqrt(a))
+
+    return R * c
