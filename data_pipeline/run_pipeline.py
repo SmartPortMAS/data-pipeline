@@ -12,6 +12,7 @@
     python -m data_pipeline.run_pipeline weather
     python -m data_pipeline.run_pipeline ais [--minutes 5]
     python -m data_pipeline.run_pipeline portmis [--start YYYYMMDD --end YYYYMMDD]
+    python -m data_pipeline.run_pipeline mart
     python -m data_pipeline.run_pipeline all
 
 MSDS는 여기 포함하지 않는다 — 배치 수집이 물질 30여 종 × 16섹션으로 몇 분씩 걸리고,
@@ -98,12 +99,30 @@ def run_portmis(start_date: str | None = None, end_date: str | None = None) -> N
     load_portmis()
 
 
+def run_mart() -> None:
+    """staging 산출물을 결합해 통합 마트를 만들고 DB에 적재한다.
+
+    수집 단계가 없는 파생 도메인 — ais/portmis(필수) 및 tide/wave/weather/UPA/MSDS
+    (있으면 병합) staging CSV가 먼저 준비되어 있어야 한다. `all` 실행 시
+    다른 도메인들이 끝난 뒤 마지막에 실행되도록 DOMAINS 순서를 유지할 것.
+    """
+    # create_mart.py는 저장소 루트에 있다 (python -m 실행 시 루트가 sys.path에 포함됨)
+    from create_mart import build_master_mart
+    from data_pipeline.loaders.mart_pg_loader import load as load_mart
+
+    print("=== [mart] 1/2 통합 마트 생성 ===")
+    build_master_mart()
+    print("=== [mart] 2/2 DB 적재 ===")
+    load_mart()
+
+
 DOMAINS = {
     "tide": run_tide,
     "wave": run_wave,
     "weather": run_weather,
     "ais": run_ais,
     "portmis": run_portmis,
+    "mart": run_mart,  # 파생 도메인 — 반드시 마지막 (staging 산출물 필요)
 }
 
 
