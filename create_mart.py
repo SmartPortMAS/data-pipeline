@@ -5,10 +5,17 @@ Staging 단계의 전처리 데이터들을 결합하여, 울산항 실시간 �
 통합 데이터 마트(Master Data Mart)를 구축합니다.
 
 병합 대상:
-    1. AIS 위치 데이터 (Dynamic) - data/staging/ais_vessel_position_stg.csv
-    2. AIS 제원 데이터 (Static) - data/staging/ais_vessel_static_stg.csv
-    3. PORT-MIS 입출항 데이터 - data/staging/portmis_vessel_stg.csv
-    * (확장 가능) 타 팀원의 기상/조위 데이터, 접안 부두 혼잡도 데이터
+    1. 선박 위치 데이터 - data/staging/upa_vessel_position_stg.csv (기본)
+       (UPA 항내 선박위치 getVslPstnInfo — callsgn/mmsi/imo/선박명 네이티브 포함.
+        파일이 없으면 레거시 AIS staging(ais_vessel_position/static)으로 폴백)
+    2. PORT-MIS 입출항 데이터 - data/staging/portmis_vessel_stg.csv
+       (선종·액체화물선 여부는 여기서 callsgn 조인으로 확정 — AIS ShipType 미의존)
+    * (확장) 기상/조위/파고, UPA 입항·하역, MSDS
+
+선박 위치 소스 교체 배경 (2026-07):
+    aisstream 기반 수집은 AIS static의 ship_type 이 전부 NaN 으로 수신되어
+    액체화물선(Tanker) 식별이 0척이었고, 위치 다수가 울산 bbox 밖으로 오탐됐다.
+    UPA API 는 울산 항내 스코프 + callsgn 네이티브 제공으로 두 문제를 해소한다.
 
 저장 경로:
     data/mart/ulsan_vessel_mart.csv (UTF-8-SIG 인코딩)
@@ -41,12 +48,18 @@ def build_master_mart():
     print("=== [3단계] 통합 데이터 마트 구축 시작 ===")
     
     # 1. 파일 경로 정의
-    pos_path = os.path.join(STAGING_DIR, "ais_vessel_position_stg.csv")
+    upa_pos_path = os.path.join(STAGING_DIR, "upa_vessel_position_stg.csv")
+    ais_pos_path = os.path.join(STAGING_DIR, "ais_vessel_position_stg.csv")
     static_path = os.path.join(STAGING_DIR, "ais_vessel_static_stg.csv")
     portmis_path = os.path.join(STAGING_DIR, "portmis_vessel_stg.csv")
-    
-    # 존재 여부 확인
-    for p in [pos_path, static_path, portmis_path]:
+
+    # 위치 소스 선택: UPA(기본) → 없으면 레거시 AIS 폴백
+    use_upa = os.path.exists(upa_pos_path)
+    if use_upa:
+        required = [upa_pos_path, portmis_path]
+    else:
+        required = [ais_pos_path, static_path, portmis_path]
+    for p in required:
         if not os.path.exists(p):
             print(f"[오류] 필수 staging 파일이 누락되었습니다: {p}")
             print("전처리 스크립트를 먼저 실행해주세요.")
@@ -54,17 +67,25 @@ def build_master_mart():
 
     # 2. 데이터 로드 및 정합성 처리
     print(" 1) Staging 데이터 로드 중...")
-    df_pos = pd.read_csv(pos_path, encoding="utf-8-sig")
-    df_static = pd.read_csv(static_path, encoding="utf-8-sig")
     df_portmis = pd.read_csv(portmis_path, encoding="utf-8-sig")
-    
-    print(f"    - AIS 위치 데이터: {len(df_pos)} 건")
-    print(f"    - AIS 제원 데이터: {len(df_static)} 건")
+
+    if use_upa:
+        df_pos = pd.read_csv(upa_pos_path, encoding="utf-8-sig")
+        df_static = None
+        print(f"    - 선박 위치 데이터 (UPA 항내): {len(df_pos)} 건")
+        # 항내 위치 데이터이므로 전 선박이 울산 관제권 내 = 울산행/재항으로 취급
+        df_pos["ulsan_bound"] = True
+    else:
+        df_pos = pd.read_csv(ais_pos_path, encoding="utf-8-sig")
+        df_static = pd.read_csv(static_path, encoding="utf-8-sig")
+        print(f"    - 선박 위치 데이터 (레거시 AIS): {len(df_pos)} 건")
+        print(f"    - AIS 제원 데이터: {len(df_static)} 건")
     print(f"    - PORT-MIS 데이터 : {len(df_portmis)} 건")
 
     # 시간 타입 명시적 변환 (mixed 포맷 및 동일 datetime64[ns, UTC] 타입 통일 적용)
     df_pos["received_at_utc"] = pd.to_datetime(df_pos["received_at_utc"], errors="coerce", format="mixed", utc=True).astype("datetime64[ns, UTC]")
-    df_static["collected_at_utc"] = pd.to_datetime(df_static["collected_at_utc"], errors="coerce", format="mixed", utc=True).astype("datetime64[ns, UTC]")
+    if df_static is not None:
+        df_static["collected_at_utc"] = pd.to_datetime(df_static["collected_at_utc"], errors="coerce", format="mixed", utc=True).astype("datetime64[ns, UTC]")
     df_portmis["collected_at_utc"] = pd.to_datetime(df_portmis["collected_at_utc"], errors="coerce", format="mixed", utc=True).astype("datetime64[ns, UTC]")
     
     if "departure_sched_utc" in df_portmis.columns:
@@ -73,13 +94,14 @@ def build_master_mart():
         df_portmis["dest_arrival_utc"] = pd.to_datetime(df_portmis["dest_arrival_utc"], errors="coerce", format="mixed", utc=True).astype("datetime64[ns, UTC]")
 
     # 3. 조인을 위한 데이터 정제 및 중복 제거
-    # 3-1. AIS 제원: MMSI별 가장 최근 수집된 1건만 남김
-    df_static_clean = (
-        df_static
-        .sort_values(by="collected_at_utc", ascending=True)
-        .drop_duplicates(subset=["mmsi"], keep="last")
-    )
-    
+    # 3-1. (레거시 AIS 폴백 전용) AIS 제원: MMSI별 가장 최근 수집된 1건만 남김
+    if df_static is not None:
+        df_static_clean = (
+            df_static
+            .sort_values(by="collected_at_utc", ascending=True)
+            .drop_duplicates(subset=["mmsi"], keep="last")
+        )
+
     # 3-2. PORT-MIS: 호출부호(callsgn)별 중복 제거 (대소문자 및 양끝 공백 제거 후 최신 1건 유지)
     df_portmis["callsgn_clean"] = df_portmis["callsgn"].astype(str).str.strip().str.upper()
     df_portmis_clean = (
@@ -90,27 +112,33 @@ def build_master_mart():
 
     # 4. 데이터 병합 (Join)
     print(" 2) 데이터 병합(LEFT JOIN) 진행 중...")
-    
-    # 4-1. AIS 위치 + AIS 제원 (Key: mmsi)
-    # 두 테이블에 공통으로 존재하는 컬럼 중 충돌을 피해야 하는 것들 명시적 처리
-    static_cols_to_use = [
-        "mmsi", "imo_no", "callsgn", "vessel_name", "ship_type", 
-        "length", "width", "draught", "Destination", "is_liquid_cargo_vessel"
-    ]
-    # 존재하는 컬럼만 필터링
-    static_cols_to_use = [col for col in static_cols_to_use if col in df_static_clean.columns]
-    
-    mart = pd.merge(
-        df_pos,
-        df_static_clean[static_cols_to_use],
-        on="mmsi",
-        how="left",
-        suffixes=("", "_static")
-    )
-    print(f"    - 위치-제원 병합 완료 (행 수: {len(mart)}건)")
 
-    # 4-2. AIS (위치+제원) + PORT-MIS (Key: callsgn)
-    # AIS 제원 정보에서 넘어온 callsgn을 기준으로 조인
+    if use_upa:
+        # 4-1. UPA 위치 데이터는 callsgn/mmsi/imo_no/vessel_name/draught 를
+        # 네이티브로 포함하므로 별도 제원(Static) 조인이 필요 없다.
+        mart = df_pos
+        print(f"    - UPA 위치 데이터 사용 (제원 조인 생략, 행 수: {len(mart)}건)")
+    else:
+        # 4-1. (레거시) AIS 위치 + AIS 제원 (Key: mmsi)
+        # 두 테이블에 공통으로 존재하는 컬럼 중 충돌을 피해야 하는 것들 명시적 처리
+        static_cols_to_use = [
+            "mmsi", "imo_no", "callsgn", "vessel_name", "ship_type",
+            "length", "width", "draught", "Destination", "is_liquid_cargo_vessel"
+        ]
+        # 존재하는 컬럼만 필터링
+        static_cols_to_use = [col for col in static_cols_to_use if col in df_static_clean.columns]
+
+        mart = pd.merge(
+            df_pos,
+            df_static_clean[static_cols_to_use],
+            on="mmsi",
+            how="left",
+            suffixes=("", "_static")
+        )
+        print(f"    - 위치-제원 병합 완료 (행 수: {len(mart)}건)")
+
+    # 4-2. 위치 + PORT-MIS (Key: callsgn)
+    # 선종(ship_kind)·액체화물선 여부는 공식 신고 데이터인 PORT-MIS 에서 확정한다.
     if "callsgn" in mart.columns:
         mart["callsgn_clean"] = mart["callsgn"].astype(str).str.strip().str.upper()
         
@@ -121,7 +149,10 @@ def build_master_mart():
             "entry_purpose_cd", "entry_purpose_nm", "origin_port_cd", "origin_port_nm",
             "prev_port_cd", "prev_port_nm", "next_port_cd", "next_port_nm",
             "dest_port_cd", "dest_port_nm", "departure_sched_utc", "dest_arrival_utc",
-            "ship_kind_category", "is_domestic_voyage", "port_agency_label"
+            "ship_kind_category", "is_domestic_voyage", "port_agency_label",
+            # 액체화물선 여부 — UPA 위치 소스에서는 PORT-MIS 선종이 유일한 판별
+            # 근거 (레거시 AIS 경로에서는 suffix _portmis 로 붙어 참고용이 된다)
+            "is_liquid_cargo_vessel",
         ]
         portmis_cols_to_use = [col for col in portmis_cols_to_use if col in df_portmis_clean.columns]
         
