@@ -28,8 +28,11 @@ from data_pipeline.common_pg_loader import get_engine, load_all
 
 MART_DIR = "data/mart"
 
+# 유니크 키 mart_uid = "선박(callsgn/mmsi) + 관측시각" 자연키 (create_mart.py 생성).
+# record_uid(전체 행 해시)는 기상 등 enrich 갱신 시 같은 위치 스냅샷을 중복
+# 적재하므로 쓰지 않는다 — 같은 스냅샷 재적재 시 최신 enrich 로 UPDATE 된다.
 TABLE_MAP = {
-    "ulsan_vessel_mart.csv": ("ulsan_vessel_mart", ["record_uid"]),
+    "ulsan_vessel_mart.csv": ("ulsan_vessel_mart", ["mart_uid"]),
 }
 
 
@@ -37,11 +40,13 @@ def _drop_if_schema_changed() -> None:
     """CSV 컬럼셋과 기존 마트 테이블 컬럼셋이 다르면 테이블을 DROP 한다."""
     engine = get_engine()
     insp = inspect(engine)
-    for fname, (table, _ucols) in TABLE_MAP.items():
+    for fname, (table, ucols) in TABLE_MAP.items():
         path = os.path.join(MART_DIR, fname)
         if not os.path.exists(path) or not insp.has_table(table):
             continue
-        csv_cols = set(pd.read_csv(path, nrows=0).columns) | {"record_uid"}
+        csv_cols = set(pd.read_csv(path, nrows=0).columns)
+        if ucols == ["record_uid"]:
+            csv_cols |= {"record_uid"}  # 해시 키는 로더가 적재 시 추가하는 컬럼
         db_cols = {c["name"] for c in insp.get_columns(table)}
         if csv_cols != db_cols:
             print(f"  - 마트 스키마 변경 감지: {table} DROP 후 재생성 "

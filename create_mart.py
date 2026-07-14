@@ -361,7 +361,25 @@ def build_master_mart():
 
     print(f"    - ETA 산출 완료 (대상 {eta_eligible.sum()}건 / 울산행 {mart['ulsan_bound'].astype(str).str.lower().eq('true').sum()}건 중)")
 
-    # 7. 최종 마트 데이터 저장
+    # 7. 위치 스냅샷 자연키(mart_uid) 생성
+    # record_uid(전체 행 해시) 적재는 기상 등 enrich 값이 갱신될 때마다 같은
+    # 위치 스냅샷을 새 행으로 중복 적재한다 → "선박(callsgn, 없으면 mmsi) +
+    # 관측시각" 자연키로 UPSERT 해 같은 스냅샷은 최신 enrich 로 갱신되게 한다.
+    import hashlib
+
+    if "callsgn" in mart.columns:
+        vessel_id = mart["callsgn"].astype(str).str.strip().str.upper()
+    else:
+        vessel_id = pd.Series("", index=mart.index)
+    invalid = vessel_id.isin(["", "NAN", "NONE"])
+    if "mmsi" in mart.columns:
+        vessel_id = vessel_id.where(~invalid, mart["mmsi"].astype(str))
+    mart["mart_uid"] = (
+        (vessel_id + "|" + mart["received_at_utc"].astype(str))
+        .map(lambda x: hashlib.md5(x.encode("utf-8")).hexdigest())
+    )
+
+    # 8. 최종 마트 데이터 저장
     os.makedirs(MART_DIR, exist_ok=True)
     output_path = os.path.join(MART_DIR, "ulsan_vessel_mart.csv")
     

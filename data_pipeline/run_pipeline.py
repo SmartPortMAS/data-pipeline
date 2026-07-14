@@ -99,6 +99,7 @@ def run_vessel() -> None:
     """
     from data_pipeline.common_pg_loader import load_all
     from data_pipeline.upa.upa_collector import UpaClient
+    from data_pipeline.upa.upa_loader import TABLE_MAP as UPA_TABLE_MAP
     from data_pipeline.upa.upa_preprocess import run_pipeline as run_upa_preprocess
 
     print("=== [vessel] 1/3 수집 (UPA 항내 선박위치) ===")
@@ -106,7 +107,8 @@ def run_vessel() -> None:
     print("=== [vessel] 2/3 전처리 ===")
     run_upa_preprocess("vessel_position", [raw_path])
     print("=== [vessel] 3/3 DB 적재 ===")
-    load_all({"upa_vessel_position_stg.csv": ("upa_vessel_position", ["record_uid"])})
+    # 유니크 키는 upa_loader TABLE_MAP 정의를 단일 정본으로 재사용
+    load_all({"upa_vessel_position_stg.csv": UPA_TABLE_MAP["upa_vessel_position_stg.csv"]})
 
 
 def run_portmis(start_date: str | None = None, end_date: str | None = None) -> None:
