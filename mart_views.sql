@@ -244,11 +244,17 @@ SELECT
 FROM upa_cargo_manifest cm
 LEFT JOIN msds_chemical ms
   ON cm.dg_un_no IS NOT NULL
- AND ms.dg_un_no::text = cm.dg_un_no::text;
+ -- UN 번호 표기 편차 정규화 후 조인: "UN1972" / "1972" / "1972.0"(숫자형 적재
+ -- 잔재) 를 모두 "1972" 로 통일. 정규화 없이 원문 비교하면 매칭 누락 발생.
+ AND nullif(regexp_replace(upper(trim(ms.dg_un_no::text)), '^UN|\.0$', '', 'g'), '')
+   = nullif(regexp_replace(upper(trim(cm.dg_un_no::text)), '^UN|\.0$', '', 'g'), '');
 
 -- ---------------------------------------------------------------------------
--- 5. mart.weather_now — 환경 최신 (항상 1행)
+-- 5. mart.weather_now — 환경 최신 (항상 정확히 1행)
 --    기상·조위·파고 각 최신 관측 1건을 옆으로 붙인다 (observed_at_utc 기준).
+--    앵커(1행) 기준 LEFT JOIN — 세 관측 테이블 중 일부가 비어 있어도(수집 전·
+--    장애) 뷰가 0행이 되지 않고 해당 소스만 NULL 로 남는다 (CROSS JOIN 이었다면
+--    한 테이블만 비어도 대시보드 환경 컬럼 전체가 사라진다).
 --    울산 단일 관측 지점 전제 — 다지점 수집으로 바뀌면 station_id 필터 추가.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.weather_now AS
@@ -269,9 +275,10 @@ SELECT
     v.wave_height_max_m,
     v.wave_period_s,
     v.wave_dir_deg
-FROM (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w
-CROSS JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t
-CROSS JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v;
+FROM (SELECT 1) AS anchor
+LEFT JOIN (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
+LEFT JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
+LEFT JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
 
 -- ---------------------------------------------------------------------------
 -- 6. mart.dashboard_current — '한 줄 조회' (대시보드·에이전트 진입점)
