@@ -21,18 +21,14 @@ import numpy as np
 # (API마다 결측값 표현이 다르기 때문에 하나의 기준으로 통일)
 NULL_VALUES = ["", " ", "null", "NULL", "None", "none", "-", "N/A", "nan", "NaN"]
 
-# 울산항 1차 관제 범위
-# (AIS, 항내 선박위치, 정박지, 부두 위치 검증에 공통 적용)
-#
-# 2026-07 확대: 기존 범위(35.30~35.58 / 129.18~129.52)가 좁아 정상 관측 다수가
-# OUT_OF_ULSAN_BBOX 로 오탐되던 문제 조치. 울산본항·온산항에 더해 외항 정박지
-# (E1~E3)와 VTS 관제 접근 수역까지 포함하도록 사방을 넓혔다.
-# 아래 값은 제안값 — `python -m data_pipeline.upa.check_coordinates` 로 실수집
-# 좌표 분포를 확인한 뒤 3팀 합의로 최종 확정한다 (3팀 공통 상수이므로 단독 변경 금지).
-ULSAN_LAT_MIN = 35.25   # 기존 35.30
-ULSAN_LAT_MAX = 35.65   # 기존 35.58
-ULSAN_LON_MIN = 129.15  # 기존 129.18
-ULSAN_LON_MAX = 129.70  # 기존 129.52
+# 울산항 1차 관제 범위 (2026-07 실측 재조정)
+# 실측 517건 분석: 기존 범위는 북쪽 접근항로(~35.85)·외해 수역(~129.77)의
+# 선박 27.5%를 OUT_OF_ULSAN_BBOX 로 오분류. 아래 값은 부두·정박지 100% +
+# 항내 선박위치 98.6% 커버 (근거: checks/check_bbox_coverage.py 실행 결과)
+ULSAN_LAT_MIN = 35.18
+ULSAN_LAT_MAX = 35.82
+ULSAN_LON_MIN = 129.22
+ULSAN_LON_MAX = 129.76
 
 
 def normalize_nulls(df: pd.DataFrame) -> pd.DataFrame:
