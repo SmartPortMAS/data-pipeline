@@ -10,6 +10,7 @@
     python -m data_pipeline.run_pipeline tide
     python -m data_pipeline.run_pipeline wave
     python -m data_pipeline.run_pipeline weather
+    python -m data_pipeline.run_pipeline weather_forecast
     python -m data_pipeline.run_pipeline ais [--minutes 5]
     python -m data_pipeline.run_pipeline portmis [--start YYYYMMDD --end YYYYMMDD]
     python -m data_pipeline.run_pipeline all
@@ -63,6 +64,19 @@ def run_weather() -> None:
     load_weather()
 
 
+def run_weather_forecast() -> None:
+    from data_pipeline.collectors.weather_forecast_collector import collect_weather_forecast_raw
+    from data_pipeline.loaders.weather_forecast_pg_loader import load as load_weather_forecast
+    from data_pipeline.preprocessors.weather_forecast_preprocessor import preprocess_weather_forecast
+
+    print("=== [weather_forecast] 1/3 수집 ===")
+    collect_weather_forecast_raw()
+    print("=== [weather_forecast] 2/3 전처리 ===")
+    preprocess_weather_forecast()
+    print("=== [weather_forecast] 3/3 DB 적재 ===")
+    load_weather_forecast()
+
+
 def run_ais(minutes: int = 5) -> None:
     from data_pipeline.collectors.ais_collector import collect_ais
     from data_pipeline.loaders.ais_pg_loader import load as load_ais
@@ -102,6 +116,7 @@ DOMAINS = {
     "tide": run_tide,
     "wave": run_wave,
     "weather": run_weather,
+    "weather_forecast": run_weather_forecast,
     "ais": run_ais,
     "portmis": run_portmis,
 }
