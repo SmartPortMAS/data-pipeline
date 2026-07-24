@@ -45,8 +45,12 @@ load_dotenv()
 
 STAGING_DIR = "data/staging"
 
-# 해시(record_uid)에서 제외할 컬럼 (실행마다 바뀌는 값)
-VOLATILE_COLS = ["collected_at_utc"]
+# 해시(record_uid)에서 제외할 컬럼 (실행마다/재수집마다 바뀌는 값)
+# - collected_at_utc: 우리 수집 시각
+# - updated_at_utc / job_at_utc: 원천 시스템(관제 등)의 갱신·배치 시각.
+#   내용이 같아도 재수집 때마다 바뀌므로 해시에 넣으면 같은 논리 레코드가
+#   이틀에 걸친 수집에서 다른 record_uid 로 중복 적재된다.
+VOLATILE_COLS = ["collected_at_utc", "updated_at_utc", "job_at_utc"]
 
 
 def get_engine() -> Engine:
@@ -106,6 +110,45 @@ def _ensure_table(engine: Engine, table: str, df: pd.DataFrame, unique_cols: lis
     print(f"  - 테이블 생성: {table} (유니크 키: {unique_cols})")
 
 
+def _ensure_unique_index(engine: Engine, table: str, unique_cols: list) -> None:
+    """기존 테이블에 unique_cols 를 커버하는 유니크 인덱스를 보장한다.
+
+    ON CONFLICT (unique_cols) 는 해당 컬럼 조합의 유니크 인덱스가 있어야 동작한다.
+    TABLE_MAP 의 키를 record_uid → 자연키로 바꾸는 등 키 체계가 변경되면
+    기존 테이블에는 새 키의 인덱스가 없으므로 여기서 만들어 준다.
+    인덱스 생성 전, 키 변경 이전에 쌓인 중복 행을 정리한다
+    (같은 키 중 collected_at_utc 최신 1행만 유지 — 재수집 중복 정리와 동일 의미).
+    """
+    insp = inspect(engine)
+    target = set(unique_cols)
+    for idx in insp.get_indexes(table):
+        if idx.get("unique") and set(idx.get("column_names") or []) == target:
+            return
+    pk = insp.get_pk_constraint(table)
+    if pk and set(pk.get("constrained_columns") or []) == target:
+        return
+
+    col_list = ", ".join(f'"{c}"' for c in unique_cols)
+    has_collected = any(c["name"] == "collected_at_utc" for c in insp.get_columns(table))
+    order_by = 'ORDER BY collected_at_utc DESC NULLS LAST, ctid DESC' if has_collected else 'ORDER BY ctid DESC'
+    idx_name = f"{table}_uidx__" + "__".join(unique_cols)
+    with engine.begin() as conn:
+        dedup_sql = (
+            f'DELETE FROM "{table}" d USING ('
+            f'  SELECT ctid, row_number() OVER (PARTITION BY {col_list} {order_by}) AS rn'
+            f'  FROM "{table}"'
+            f') r WHERE d.ctid = r.ctid AND r.rn > 1;'
+        )
+        deleted = conn.execute(text(dedup_sql)).rowcount
+        conn.execute(text(
+            f'CREATE UNIQUE INDEX IF NOT EXISTS "{idx_name}" ON "{table}" ({col_list})'
+        ))
+    if deleted:
+        print(f"  - 키 체계 변경: {table} 기존 중복 {deleted}행 정리 후 유니크 인덱스 생성 ({unique_cols})")
+    else:
+        print(f"  - 유니크 인덱스 생성: {table} ({unique_cols})")
+
+
 def upsert_dataframe(
     engine: Engine, table: str, df: pd.DataFrame, unique_cols: list, auto_create: bool = True,
 ) -> int:
@@ -113,6 +156,7 @@ def upsert_dataframe(
     if df.empty:
         return 0
     _ensure_table(engine, table, df, unique_cols, auto_create)
+    _ensure_unique_index(engine, table, unique_cols)
 
     cols = list(df.columns)
     tmp = f"_tmp_{table}"
@@ -135,15 +179,17 @@ def upsert_dataframe(
 def load_csv(engine: Engine, csv_path: str, table: str, unique_cols: list, auto_create: bool = True) -> int:
     df = pd.read_csv(csv_path)
     if df.empty:
-        print(f"[SKIP] {csv_path} 비어 있음")
+        print(f"[SKIP] {csv_path} empty")
         return 0
-    # _utc 컬럼을 datetime으로 파싱 — 문자열 그대로 두면 임시 테이블이 TEXT로
-    # 생성되어 Alembic이 TIMESTAMPTZ로 만든 실제 테이블과 타입이 안 맞아 upsert가 실패한다.
     for col in df.columns:
         if col.endswith("_utc"):
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
     if unique_cols == ["record_uid"]:
         df = add_record_uid(df)
+    else:
+        # batch dedup: same unique key twice in one INSERT
+        # causes ON CONFLICT DO UPDATE CardinalityViolation
+        df = df.drop_duplicates(subset=unique_cols, keep="last").reset_index(drop=True)
     n = upsert_dataframe(engine, table, df, unique_cols, auto_create)
     print(f"[OK] {os.path.basename(csv_path)} -> {table} ({n} rows upsert)")
     return n
