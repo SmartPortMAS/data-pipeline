@@ -31,6 +31,19 @@ import argparse
 import asyncio
 import datetime
 
+# --skip-db 로 켜지면 DB 적재 단계를 건너뛴다.
+# backend(Alembic) 미구축 상태에서는 대부분 도메인의 테이블이 없어 DB 적재가
+# 실패하므로, 수집·전처리(staging CSV)만 돌려 검증할 때 사용한다.
+SKIP_DB = False
+
+
+def _load(fn) -> None:
+    """DB 적재 단계 실행 (SKIP_DB 면 건너뜀)."""
+    if SKIP_DB:
+        print("    (--skip-db: DB 적재 건너뜀 — staging CSV까지만 생성)")
+        return
+    fn()
+
 
 def run_tide() -> None:
     from data_pipeline.collectors.tide_collector import collect_tide_raw
@@ -42,7 +55,7 @@ def run_tide() -> None:
     print("=== [tide] 2/3 전처리 ===")
     preprocess_tide()
     print("=== [tide] 3/3 DB 적재 ===")
-    load_tide()
+    _load(load_tide)
 
 
 def run_wave() -> None:
@@ -55,7 +68,7 @@ def run_wave() -> None:
     print("=== [wave] 2/3 전처리 ===")
     preprocess_wave()
     print("=== [wave] 3/3 DB 적재 ===")
-    load_wave()
+    _load(load_wave)
 
 
 def run_weather() -> None:
@@ -68,7 +81,7 @@ def run_weather() -> None:
     print("=== [weather] 2/3 전처리 ===")
     preprocess_weather()
     print("=== [weather] 3/3 DB 적재 ===")
-    load_weather()
+    _load(load_weather)
 
 
 def run_ais(minutes: int = 5) -> None:
@@ -86,7 +99,7 @@ def run_ais(minutes: int = 5) -> None:
     preprocess_ais_static()
     preprocess_ais_position()
     print("=== [ais] 3/3 DB 적재 ===")
-    load_ais()
+    _load(load_ais)
 
 
 def run_vessel() -> None:
@@ -108,7 +121,7 @@ def run_vessel() -> None:
     run_upa_preprocess("vessel_position", [raw_path])
     print("=== [vessel] 3/3 DB 적재 ===")
     # 유니크 키는 upa_loader TABLE_MAP 정의를 단일 정본으로 재사용
-    load_all({"upa_vessel_position_stg.csv": UPA_TABLE_MAP["upa_vessel_position_stg.csv"]})
+    _load(lambda: load_all({"upa_vessel_position_stg.csv": UPA_TABLE_MAP["upa_vessel_position_stg.csv"]}))
 
 
 def run_portmis(start_date: str | None = None, end_date: str | None = None) -> None:
@@ -125,7 +138,7 @@ def run_portmis(start_date: str | None = None, end_date: str | None = None) -> N
     print("=== [portmis] 2/3 전처리 ===")
     preprocess_portmis()
     print("=== [portmis] 3/3 DB 적재 ===")
-    load_portmis()
+    _load(load_portmis)
 
 
 def run_mart() -> None:
@@ -142,7 +155,7 @@ def run_mart() -> None:
     print("=== [mart] 1/2 통합 마트 생성 ===")
     build_master_mart()
     print("=== [mart] 2/2 DB 적재 ===")
-    load_mart()
+    _load(load_mart)
 
 
 DOMAINS = {
@@ -170,7 +183,18 @@ def main() -> None:
     parser.add_argument("--minutes", type=int, default=5, help="[ais 전용] 수집 시간(분)")
     parser.add_argument("--start", type=str, default=None, help="[portmis 전용] 조회 시작일 YYYYMMDD")
     parser.add_argument("--end", type=str, default=None, help="[portmis 전용] 조회 종료일 YYYYMMDD")
+    parser.add_argument(
+        "--skip-db",
+        action="store_true",
+        help="DB 적재 단계를 건너뛰고 수집·전처리(staging CSV)까지만 실행 "
+             "(backend Alembic 미구축 시 검증용)",
+    )
     args = parser.parse_args()
+
+    global SKIP_DB
+    SKIP_DB = args.skip_db
+    if SKIP_DB:
+        print("[안내] --skip-db: DB 적재를 건너뜁니다. staging CSV 생성까지만 수행.\n")
 
     targets = list(DOMAINS.keys()) if args.domain == "all" else [args.domain]
 
