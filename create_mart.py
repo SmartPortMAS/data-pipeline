@@ -39,10 +39,31 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STAGING_DIR = os.path.join(BASE_DIR, "data", "staging")
 MART_DIR = os.path.join(BASE_DIR, "data", "mart")
 
-# 울산항 관제 목표 좌표 (입항 정박지 대표 좌표)
-# TODO: 함현우 담당의 부두별 접안 좌표가 확정되면 선종/화물별 타겟 좌표로 세분화
+# 울산항 관제 목표 좌표 (입항 정박지 대표 좌표) — 부두별 좌표를 못 찾을 때의 폴백.
 ULSAN_TARGET_LAT = 35.475
 ULSAN_TARGET_LON = 129.387
+
+# 부두별 접안 좌표 세분화 (온산 MVP 이식 — 이 TODO가 원래 여기 있었다:
+# "함현우 담당의 부두별 접안 좌표가 확정되면 선종/화물별 타겟 좌표로 세분화").
+# 팀원이 PDF에서 새로 만든 CSV를 쓰지 않고, 이미 매일 수집되는
+# upa_berth_facility_stg.csv(부두 GIS, UPA getGisBaseHrbrFcltDtlInfo)를 그대로
+# 재사용한다 — 온산MVP_이식_코드변화예측 9장에서 확인된 대로 팀원 CSV와 대상
+# 데이터가 겹치므로 새 좌표 테이블을 또 만들지 않는다.
+BERTH_COORDS_PATH = os.path.join(STAGING_DIR, "upa_berth_facility_stg.csv")
+
+
+def _load_berth_target_coords() -> dict:
+    """wharf_name -> (lat, lon) 조회 테이블. upa_port_call의 facility_name과
+    wharf_name이 같은 UPA 명명 체계를 쓰므로 그대로 조인 키로 쓸 수 있다.
+
+    좌표 결측 선석(SPM 부이 2기, 달포부두 등)은 이 사전에 없다 — 그런 선석이
+    타겟이면 ULSAN_TARGET_LAT/LON(항 전체 대표 좌표)으로 자동 폴백한다.
+    """
+    if not os.path.exists(BERTH_COORDS_PATH):
+        return {}
+    df = pd.read_csv(BERTH_COORDS_PATH, encoding="utf-8-sig")
+    df = df.dropna(subset=["wharf_name", "latitude", "longitude"])
+    return {row["wharf_name"]: (row["latitude"], row["longitude"]) for _, row in df.iterrows()}
 
 def build_master_mart():
     print("=== [3단계] 통합 데이터 마트 구축 시작 ===")
@@ -339,13 +360,29 @@ def build_master_mart():
 
 
     # 6. ETA(입항예정시각) 예측
-    # 대지속력(sog)·현재 위치 기반 울산항 목표 좌표까지의 구면거리(해리) 산출 후,
+    # 대지속력(sog)·현재 위치 기반 목표 좌표까지의 구면거리(해리) 산출 후,
     # "거리 / 속력" 공식으로 잔여 항행 시간을 추정해 ETA를 계산합니다.
     # (대상: 울산행으로 식별된 선박 중, 좌표·속력이 유효한 운항 중인 선박)
+    #
+    # 목표 좌표는 항 전체 대표점 하나가 아니라, UPA 입항실적(facility_name, 5-2절
+    # 병합분)으로 확인된 실제 접안 부두 좌표를 우선 쓴다(온산 MVP 이식 — 원래
+    # 이 자리의 TODO였던 "부두별 타겟 좌표 세분화"). facility_name이 없거나
+    # 좌표 결측 부두(SPM 부이 등)면 항 전체 대표 좌표로 폴백한다.
     print(" 3) ETA(입항예정시각) 예측 중...")
 
+    berth_coords = _load_berth_target_coords()
+    if "facility_name" in mart.columns and berth_coords:
+        target_coords = mart["facility_name"].map(berth_coords)
+        target_lat = target_coords.map(lambda c: c[0] if isinstance(c, tuple) else None).fillna(ULSAN_TARGET_LAT)
+        target_lon = target_coords.map(lambda c: c[1] if isinstance(c, tuple) else None).fillna(ULSAN_TARGET_LON)
+        matched = target_coords.notna().sum()
+        print(f"    - 부두별 타겟 좌표 매칭: {matched}/{len(mart)}건 (나머지는 항 전체 대표 좌표로 폴백)")
+    else:
+        target_lat = ULSAN_TARGET_LAT
+        target_lon = ULSAN_TARGET_LON
+
     mart["distance_to_ulsan_nm"] = cu.haversine_distance_nm(
-        mart["latitude"], mart["longitude"], ULSAN_TARGET_LAT, ULSAN_TARGET_LON
+        mart["latitude"], mart["longitude"], target_lat, target_lon
     )
 
     eta_eligible = (
