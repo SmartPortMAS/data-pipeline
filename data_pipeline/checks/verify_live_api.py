@@ -96,7 +96,11 @@ def verify_portmis() -> None:
 
 
 def verify_tide() -> None:
-    """③ KHOA 조위 (울산 DT_0020)"""
+    """③ KHOA 조위 (울산 DT_0020)
+
+    응답 구조는 최상위가 {header, body} 이며 'response' 래퍼가 없다
+    (tide_collector.fetch_recent 와 동일). resultCode='00' 이 정상.
+    """
     key_enc = urllib.parse.quote(os.getenv("KHOA_API_KEY", ""), safe="")
     try:
         url = (
@@ -105,8 +109,13 @@ def verify_tide() -> None:
         )
         r = requests.get(url, timeout=20)
         data = r.json()
-        items = (data.get("response", {}).get("body", {}).get("items", {}) or {}).get("item", []) or []
-        report("KHOA 조위", bool(items), f"HTTP {r.status_code}, {len(items)}건 수신")
+        result_code = data.get("header", {}).get("resultCode", "")
+        items = (data.get("body", {}).get("items", {}) or {}).get("item", []) or []
+        if isinstance(items, dict):
+            items = [items]
+        ok = result_code == "00" and bool(items)
+        msg = f"HTTP {r.status_code}, resultCode={result_code}, {len(items)}건 수신"
+        report("KHOA 조위", ok, msg)
     except Exception as e:  # noqa: BLE001
         report("KHOA 조위", False, f"{type(e).__name__}: {e}")
 
@@ -126,30 +135,52 @@ def verify_kma_buoy() -> None:
 
 
 def verify_weather() -> None:
-    """⑤ 해수부 항만기상 (울산)"""
+    """⑤ 해수부 항만기상 (울산청 104 / 울산항동방파제서단등대 1041519)
+
+    mmaf·mmsi·dataType 은 필수 파라미터 — 빠지면 HTTP 400 이 난다
+    (weather_collector.fetch_weather_now 와 동일). result.status='OK' 가 정상.
+    """
     try:
         r = requests.get(
             "http://marineweather.nmpnt.go.kr:8001/openWeatherNow.do",
-            params={"serviceKey": os.getenv("MMAF_API_KEY", ""), "resultType": "json"},
+            params={
+                "serviceKey": os.getenv("MMAF_API_KEY", ""),
+                "resultType": "json",
+                "mmaf": "104",
+                "mmsi": "1041519",
+                "dataType": "1",
+            },
             timeout=20,
         )
-        report("항만기상", r.ok, f"HTTP {r.status_code}, {len(r.text)}바이트 수신")
+        status = ""
+        try:
+            status = r.json().get("result", {}).get("status", "")
+        except ValueError:
+            pass
+        ok = r.ok and status == "OK"
+        report("항만기상", ok, f"HTTP {r.status_code}, status={status or 'N/A'}, {len(r.text)}바이트")
     except Exception as e:  # noqa: BLE001
         report("항만기상", False, f"{type(e).__name__}: {e}")
 
 
 def verify_msds() -> None:
-    """⑥ KOSHA MSDS (벤젠 검색 1건)"""
+    """⑥ KOSHA MSDS (벤젠 CAS 71-43-2 조회 1건)
+
+    엔드포인트는 /getChemList (msds_api_collector.fetch_chem_by_cas 와 동일).
+    CAS 정확검색은 searchCnd=1. 응답은 XML 이므로 <item> 개수로 성공 판정.
+    """
     try:
         r = requests.get(
-            "https://apis.data.go.kr/B552468/msdschem/chemlistPage",
+            "https://apis.data.go.kr/B552468/msdschem/getChemList",
             params={
                 "serviceKey": os.getenv("KOSHA_MSDS_API_KEY", ""),
-                "searchWrd": "벤젠", "searchCnd": 0, "numOfRows": 1, "pageNo": 1,
+                "searchWrd": "71-43-2", "searchCnd": 1, "numOfRows": 1, "pageNo": 1,
             },
             timeout=20,
         )
-        report("KOSHA MSDS", r.ok, f"HTTP {r.status_code}, {len(r.text)}바이트 수신")
+        n_items = r.text.count("<item>")
+        ok = r.ok and n_items > 0
+        report("KOSHA MSDS", ok, f"HTTP {r.status_code}, item {n_items}건, {len(r.text)}바이트")
     except Exception as e:  # noqa: BLE001
         report("KOSHA MSDS", False, f"{type(e).__name__}: {e}")
 
