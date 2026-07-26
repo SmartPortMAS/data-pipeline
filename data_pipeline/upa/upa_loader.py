@@ -35,7 +35,11 @@ from data_pipeline.common_pg_loader import load_all as _load_all
 # 결측 가능해 유니크 인덱스로 쓸 수 없다. bzentyCd 확보 후 키 확정 예정.
 TABLE_MAP = {
     "upa_vessel_position_stg.csv": ("upa_vessel_position", ["callsgn", "received_at_utc"]),
-    "upa_port_call_stg.csv": ("upa_port_call", ["port_call_id"]),
+    # 입항 건(port_call_id) 하나에 입항·접안·이안·출항 이벤트가 comm_count 로 나뉘어
+    # 여러 행 온다. 키를 port_call_id 만으로 두면 이벤트가 1행으로 합쳐져
+    # "언제 접안했고 언제 이안했는지"가 사라진다 → 이벤트 단위 복합키로 보존한다.
+    # (선박별 입항 1건만 필요한 소비자는 DISTINCT ON (port_call_id) 로 쓰면 된다)
+    "upa_port_call_stg.csv": ("upa_port_call", ["port_call_id", "comm_count"]),
     "upa_cargo_manifest_stg.csv": ("upa_cargo_manifest", ["record_uid"]),
     "upa_unload_record_stg.csv": ("upa_unload_record", ["unload_record_id"]),
     "upa_berth_facility_stg.csv": ("upa_berth_facility", ["wharf_name"]),
