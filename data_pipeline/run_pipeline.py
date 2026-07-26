@@ -125,6 +125,53 @@ def run_vessel() -> None:
     load_all({"upa_vessel_position_stg.csv": UPA_TABLE_MAP["upa_vessel_position_stg.csv"]})
 
 
+def run_port_call() -> None:
+    """입출항: UPA 운항정보(getVtsBaseVslNvgtInfo) 수집 → 전처리 → DB 적재.
+
+    이 API는 callsgn(호출부호)이 필수라 "오늘 입항 전체"를 한 번에 못 받는다.
+    대신 **항차(vyg)는 생략 가능**해서 `호출부호 + 입항연도`만 주면 그 선박의
+    올해 입출항 이력이 통째로 온다(2026-07-26 실측: 1척 조회에 183건).
+    호출부호는 파라미터 없이 조회되는 선박위치 API에서 얻는다.
+
+        선박위치(전체 조회) → 호출부호 N개 → 운항정보 N회 호출 → upa_port_call UPSERT
+
+    호출량은 항내 선박 수(약 550척) = 일일 허용 10만 회의 0.5% 수준이라 여유롭다.
+    수집·전처리 함수(collect_vessel_nvgt / preprocess_vessel_nvgt)는 이미 upa
+    모듈에 있고, 여기서는 일일 파이프라인에 연결만 한다.
+    """
+    import json as _json
+
+    from data_pipeline.common_pg_loader import load_all
+    from data_pipeline.upa.upa_collector import (
+        UpaClient,
+        _extract_items,
+        derive_nvgt_targets_from_position,
+    )
+    from data_pipeline.upa.upa_loader import TABLE_MAP as UPA_TABLE_MAP
+    from data_pipeline.upa.upa_preprocess import run_pipeline as run_upa_preprocess
+
+    year = datetime.datetime.now().strftime("%Y")
+    client = UpaClient()
+
+    print("=== [port_call] 1/4 호출부호 확보 (선박위치) ===")
+    pos_path = client.collect_vessel_position()
+    with open(pos_path, encoding="utf-8") as f:
+        targets = derive_nvgt_targets_from_position(_extract_items(_json.load(f)), year)
+    # vyg 는 비워 보낸다 — 특정 항차가 아니라 그 선박의 연간 이력 전체를 받기 위함
+    for t in targets:
+        t["vyg"] = None
+    if not targets:
+        print("[port_call] 항내 선박이 없어 건너뜁니다.")
+        return
+
+    print(f"=== [port_call] 2/4 운항정보 수집 (대상 {len(targets)}척) ===")
+    raw_path = client.collect_vessel_nvgt(targets)
+    print("=== [port_call] 3/4 전처리 ===")
+    run_upa_preprocess("vessel_nvgt", [raw_path])
+    print("=== [port_call] 4/4 DB 적재 ===")
+    load_all({"upa_port_call_stg.csv": UPA_TABLE_MAP["upa_port_call_stg.csv"]})
+
+
 def run_portmis(start_date: str | None = None, end_date: str | None = None) -> None:
     from data_pipeline.collectors.portmis_collector import collect_portmis
     from data_pipeline.loaders.portmis_pg_loader import load as load_portmis
@@ -165,6 +212,7 @@ DOMAINS = {
     "weather": run_weather,
     "weather_forecast": run_weather_forecast,
     "vessel": run_vessel,  # 선박위치 (UPA getVslPstnInfo) — 구 ais 도메인 대체
+    "port_call": run_port_call,  # 입출항 이력 (UPA getVtsBaseVslNvgtInfo) — 선박위치 뒤에 실행
     "portmis": run_portmis,
     "mart": run_mart,  # 파생 도메인 — 반드시 마지막 (staging 산출물 필요)
 }
