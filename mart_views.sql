@@ -37,6 +37,67 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
 -- ---------------------------------------------------------------------------
+-- 0. 선행 조건: 참조 테이블 존재 보장 (빈 테이블이라도)
+--
+-- PostgreSQL 은 CREATE VIEW 시점에 참조 테이블의 "존재"를 검사한다(데이터는 안
+-- 읽는다). 따라서 테이블이 아예 없으면 뷰 등록 자체가 실패한다.
+--
+-- upa_cargo_manifest 는 UPA 통합화물 API(getIntgCagInfo)가 업체코드(bzentyCd)
+-- 필수라 아직 자동수집이 불가해 테이블이 없는 상태다. 그 결과 화물과 직접
+-- 관련이 없는 port_call_overview 까지 (5개 부가 컬럼을 LEFT JOIN 한다는 이유로)
+-- 함께 생성 실패하고, 이를 참조하는 dashboard_current 까지 연쇄로 죽었다.
+--
+-- 아래 CREATE TABLE IF NOT EXISTS 로 "빈 껍데기"를 보장하면:
+--   - 뷰 6종이 화물 데이터 없이도 정상 등록된다 (화물 컬럼만 NULL)
+--   - 나중에 실데이터(또는 합성 샘플)가 적재되면 뷰 수정 없이 그대로 채워진다
+--   - 이미 테이블이 있으면 이 구문은 아무 일도 하지 않는다 (기존 데이터 안전)
+--
+-- 컬럼 구성은 upa_config.py 의 INTG_CAG_INFO / INPRT_CAG_DCLR_INFO column_map
+-- 합집합 + 공통 메타데이터를 따른다 (적재 시 스키마 불일치 방지).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
+    port_code                    text,
+    ptent_yr                     text,
+    voyage_no                    text,
+    callsgn                      text,
+    vessel_name                  text,
+    vessel_type_name             text,
+    vessel_nationality_code      text,
+    vessel_nationality_name      text,
+    mrn_no                       text,
+    bl_no                        text,
+    master_bl_no                 text,
+    io_se_code                   text,
+    io_se_name                   text,
+    facility_name                text,
+    cargo_se_name                text,
+    cargo_name_raw               text,          -- MSDS 매핑 입력
+    dg_un_no                     text,          -- 위험물 UN 번호 (MSDS 조인키)
+    cargo_basis                  text,          -- 합성 샘플의 화물 배정 근거 표기
+    package_type_name            text,
+    unload_method_name           text,
+    vol_ton_unit_name            text,
+    vol_ton                      double precision,
+    weight_ton                   double precision,
+    vol_size                     double precision,
+    weight_size                  double precision,
+    bulk_vol_size                double precision,
+    bulk_weight_size             double precision,
+    container_count              double precision,
+    pod_name                     text,          -- 양하항
+    pol_name                     text,          -- 적하항
+    ldud_port_name               text,          -- 양적하 항구명 (내항화물)
+    last_dest_port_name          text,
+    arrival_at_utc               timestamptz,
+    customs_progress_status_name text,
+    source_system                text,
+    source_table                 text,
+    collected_at_utc             timestamptz,
+    quality_flag                 text,
+    is_synthetic                 boolean
+);
+
+-- ---------------------------------------------------------------------------
 -- 1. mart.vessel_identity — 선박 식별 마스터 (1척 = 1행)
 --    위치(UPA)와 PORT-MIS 를 callsgn 으로 묶고, 식별 우선순위 imo → mmsi →
 --    callsgn 에 따라 대표 키(vessel_key)를 만든다. 선종·액체화물선 여부는
