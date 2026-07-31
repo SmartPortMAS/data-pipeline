@@ -1,0 +1,2 @@
+﻿observed_at_utc,wind_dir_deg,wind_speed_ms,air_temp_c,humidity_pct,air_pressure_hpa,visibility_m,wave_height_sig_m,violation_id,note,is_synthetic
+2026-07-27 06:00:00+00:00,225,19.5,28.0,82,998.0,1200,1.8,V-WX-01,정일1/2부두 기준(중단 풍속17·파고1.0 / 이안 풍속19) 초과,True

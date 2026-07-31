@@ -281,20 +281,109 @@ LEFT JOIN pc_latest pc ON pc.callsgn = pm.callsgn
 LEFT JOIN cargo_sum cs ON cs.callsgn = pm.callsgn;
 
 -- ---------------------------------------------------------------------------
+-- 3-1. mart.msds_flat — msds_chemical(JSONB) → 안전관제용 평면 뷰
+--
+--   스키마 합의(2026-07): msds_chemical 은 KOSHA 원본 16개 섹션을
+--   msds_payload(JSONB)에 무손실 보존한다(로더 설계 원칙 유지). 대신 소비자
+--   (mart 뷰·백엔드 API·LLM 에이전트)가 각자 JSONB 경로를 파고들면 파싱 규칙이
+--   곳곳에 중복·분기되므로, **평탄화 규칙의 단일 정본**을 이 뷰 한 곳에 둔다.
+--   → 원본 보존(JSONB)과 소비 편의(평면 컬럼)를 둘 다 취하는 구조.
+--   → 필요한 항목이 늘면 이 뷰만 고치면 된다 (Alembic 마이그레이션 불필요).
+--
+--   추출 키는 KOSHA 가 부여하는 msdsItemCode(안정 코드)를 쓴다 — 한글 라벨이
+--   바뀌어도 깨지지 않는다.
+--     I14=인화점  I32=자연발화온도  I26=증기밀도
+--     N02=UN번호  N06=운송위험성등급(IMDG)  N08=용기등급
+--     B02=유해성분류  B0402=그림문자  B0404=신호어  B0406=유해·위험문구(H)
+--
+--   전제: msds_chemical 테이블은 backend(Alembic) 소유이며 이미 존재한다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.msds_flat AS
+WITH item AS (
+    SELECT m.chem_id,
+           it->>'msdsItemCode' AS item_code,
+           it->>'itemDetail'   AS item_detail
+    FROM msds_chemical m
+    CROSS JOIN LATERAL jsonb_each(m.msds_payload) AS d(key, val)
+    CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(d.val->'data') = 'array'
+             THEN d.val->'data' ELSE '[]'::jsonb END) AS it
+    WHERE d.key LIKE 'detail%'
+),
+clean AS (   -- HTML 이스케이프 복원 + '자료없음'/빈값 → NULL
+    SELECT chem_id, item_code,
+           nullif(nullif(btrim(replace(replace(replace(
+               item_detail, '&lt;', '<'), '&gt;', '>'), '&amp;', '&')), ''), '자료없음') AS v
+    FROM item
+),
+pick AS (
+    SELECT chem_id,
+           max(v) FILTER (WHERE item_code = 'I14')   AS flash_point_raw,
+           max(v) FILTER (WHERE item_code = 'I32')   AS autoignition_raw,
+           max(v) FILTER (WHERE item_code = 'I26')   AS vapor_density_raw,
+           max(v) FILTER (WHERE item_code = 'N02')   AS un_no_msds,
+           max(v) FILTER (WHERE item_code = 'N06')   AS imdg_class,
+           max(v) FILTER (WHERE item_code = 'N08')   AS packing_group,
+           max(v) FILTER (WHERE item_code = 'B02')   AS ghs_hazard,
+           max(v) FILTER (WHERE item_code = 'B0402') AS ghs_pictogram,
+           max(v) FILTER (WHERE item_code = 'B0404') AS signal_word,
+           max(v) FILTER (WHERE item_code = 'B0406') AS h_statements
+    FROM clean GROUP BY chem_id
+)
+SELECT
+    m.chem_id,
+    m.cas_no,
+    m.name_ko,
+    m.name_en,
+    -- UN 번호: 로더 컬럼 우선, 비어 있으면 payload(N02)로 보강
+    COALESCE(nullif(btrim(m.un_no), ''), p.un_no_msds)                  AS dg_un_no,
+    p.flash_point_raw,
+    -- 인화점 숫자화: '℃' 앞부분만 잘라(뒤쪽 압력값 오인 방지) 첫 실수를 취한다.
+    --   '-37 ℃|※출처'           → -37
+    --   '11.11 ℃|※출처'         → 11.11
+    --   '< -40 ℃ (ca. 101.325)'  → -40   (℃ 앞만 보므로 101.325 무시)
+    --   '58~66 ℃'                → 58    (범위는 하한 = 보수적, 낮을수록 위험)
+    --   '<  ℃ (c.c.)' / '(인화성 가스)' → NULL (숫자 없음)
+    (regexp_match(split_part(p.flash_point_raw, '℃', 1),
+                  '(-?[0-9]+(?:\.[0-9]+)?)'))[1]::numeric              AS flash_point_celsius,
+    p.imdg_class,
+    p.packing_group,
+    p.signal_word,
+    p.h_statements,
+    p.ghs_pictogram,
+    p.ghs_hazard,
+    p.autoignition_raw,
+    p.vapor_density_raw
+FROM msds_chemical m
+LEFT JOIN pick p ON p.chem_id = m.chem_id;
+
+-- ---------------------------------------------------------------------------
 -- 4. mart.cargo_msds — 화물 ↔ MSDS 위험물 (★안전관제 핵심, 화물 행 단위)
---    UPA 화물 manifest 의 dg_un_no ↔ msds_chemical.dg_un_no 조인으로
+--    UPA 화물 manifest 의 dg_un_no ↔ mart.msds_flat.dg_un_no 조인으로
 --    화물 1건마다 인화점·IMDG 등급·GHS 정보를 붙인다. UN 번호가 없는 화물은
 --    msds_matched=false 로 남는다 (일반 화물 or 코드 미기재 — 후자는 bzentyCd
 --    확보로 통합화물 API 조회가 가능해지면 자동으로 채워진다).
+--    ※ msds_chemical 을 직접 읽지 않고 mart.msds_flat 을 경유한다 — JSONB
+--      평탄화 규칙을 한 곳에서만 관리하기 위함 (3-1 참고).
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.cargo_msds AS
 SELECT
     upper(trim(cm.callsgn))        AS callsgn,
     cm.bl_no,
+    -- 접안 시설명 — 혼재금지(IMDG 격리) 판정에 필수.
+    -- "인접 선석에서 비혼재 등급을 동시 취급 중인가"를 판정하려면 화물이 어느
+    -- 부두에 있는지 알아야 한다 (Neo4j ADJACENT_TO 선석쌍과 대조).
+    cm.facility_name,
+    -- 포장·하역방식 — 용기등급 대비 적정성 판정용
+    -- (예: 용기등급 Ⅰ 화물을 일반 드럼·크레인으로 신고한 경우)
+    cm.cargo_se_name,
+    cm.package_type_name,
+    cm.unload_method_name,
     cm.cargo_name_raw,
     cm.dg_un_no,
     ms.chem_id,
     ms.cas_no,
+    ms.name_ko                     AS msds_name_ko,
     ms.flash_point_celsius,
     ms.imdg_class,
     ms.packing_group,
@@ -303,7 +392,7 @@ SELECT
     ms.h_statements,
     (ms.chem_id IS NOT NULL)       AS msds_matched
 FROM upa_cargo_manifest cm
-LEFT JOIN msds_chemical ms
+LEFT JOIN mart.msds_flat ms
   ON cm.dg_un_no IS NOT NULL
  -- UN 번호 표기 편차 정규화 후 조인: "UN1972" / "1972" / "1972.0"(숫자형 적재
  -- 잔재) 를 모두 "1972" 로 통일. 정규화 없이 원문 비교하면 매칭 누락 발생.
