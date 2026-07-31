@@ -370,6 +370,15 @@ CREATE OR REPLACE VIEW mart.cargo_msds AS
 SELECT
     upper(trim(cm.callsgn))        AS callsgn,
     cm.bl_no,
+    -- 접안 시설명 — 혼재금지(IMDG 격리) 판정에 필수.
+    -- "인접 선석에서 비혼재 등급을 동시 취급 중인가"를 판정하려면 화물이 어느
+    -- 부두에 있는지 알아야 한다 (Neo4j ADJACENT_TO 선석쌍과 대조).
+    cm.facility_name,
+    -- 포장·하역방식 — 용기등급 대비 적정성 판정용
+    -- (예: 용기등급 Ⅰ 화물을 일반 드럼·크레인으로 신고한 경우)
+    cm.cargo_se_name,
+    cm.package_type_name,
+    cm.unload_method_name,
     cm.cargo_name_raw,
     cm.dg_un_no,
     ms.chem_id,
