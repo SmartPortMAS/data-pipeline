@@ -30,8 +30,10 @@
 --   2. mart.vessel_latest_position 선박별 최신 위치 1행 (UPA 우선, AIS 보강)
 --   3. mart.port_call_overview     입항 통합 (입항건당 대표 1행)
 --   4. mart.cargo_msds             화물 ↔ MSDS (★안전관제 핵심)
---   5. mart.weather_now            환경 최신 1행 (기상+조위+파고 스냅샷)
+--   5. mart.weather_now            환경 최신 1행 (기상+조위+파고+조류 스냅샷)
+--   5-1. mart.berth_draught_check  조위 반영 가용수심 · UKC 판정
 --   6. mart.dashboard_current      '한 줄 조회' — 대시보드·에이전트 진입점
+--   (+ mart.msds_flat             msds_chemical JSONB 평탄화 — cargo_msds 가 사용)
 -- ===========================================================================
 
 CREATE SCHEMA IF NOT EXISTS mart;
@@ -102,22 +104,83 @@ CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
 --    위치(UPA)와 PORT-MIS 를 callsgn 으로 묶고, 식별 우선순위 imo → mmsi →
 --    callsgn 에 따라 대표 키(vessel_key)를 만든다. 선종·액체화물선 여부는
 --    공식 신고 데이터인 PORT-MIS 를 정본으로 삼는다.
+--
+--    [MMSI-First + Stateful Filling]  (callsgn 결측 31% 대응)
+--    UPA getVslPstnInfo 는 AIS 동적신호(위치)를 기반으로 하고, callsgn 은
+--    정적신호(Msg Type 5)에서 온다. 정적신호는 6분 주기라 스냅샷에 따라
+--    비거나(간헐 결측), 아예 송출하지 않는 선박(관공선·소방정·순찰선·예부선
+--    등 150척)도 있다. 따라서:
+--
+--      (a) 파티션 키를 callsgn 이 아니라 MMSI 로 둔다 → callsgn 이 한 번도
+--          없는 선박도 뷰에서 사라지지 않는다 (MMSI-First).
+--      (b) callsgn/IMO/선명은 "그 MMSI 의 가장 최근 non-null 값"을 끌어와
+--          채운다 (Stateful Filling / Last Known Position).
+--          first_value(...) OVER (PARTITION BY vessel_uid
+--                                 ORDER BY (x IS NOT NULL) DESC, received_at_utc DESC)
+--          → boolean 은 false < true 이므로 DESC 를 주면 non-null 행이 먼저
+--            오고, 그중 가장 최신 행의 값이 선택된다.
+--      (c) callsgn_source 로 출처를 표기한다:
+--            'current' = 최신 관측에 실제로 실려온 값
+--            'filled'  = 과거 신호에서 끌어온 값 (정적신호 일시 누락)
+--            NULL      = 한 번도 받은 적 없음 (MMSI 로만 식별)
+--
+--    ★ 주의: 여기서 앞으로 끌어오는 것은 "정적 식별정보"(호출부호·IMO·선명)
+--      뿐이다. 위치(위경도·SOG·COG)는 절대 채워 넣지 않는다. 떠난 배가 옛
+--      좌표로 남아 있으면 안전관제상 오히려 위험하다. 위치는 계속
+--      mart.vessel_latest_position 이 관측된 시각 그대로 보여준다.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.vessel_identity AS
-WITH pos_latest AS (
-    SELECT DISTINCT ON (upper(trim(callsgn)))
-           upper(trim(callsgn))            AS callsgn,
-           mmsi,
-           imo_no::bigint                  AS imo_no,
-           vessel_name,
-           received_at_utc                 AS last_position_at_utc
+WITH pos_src AS (
+    SELECT
+        -- 선박 고유키: MMSI 우선, MMSI 조차 없으면 callsgn 으로 대체
+        COALESCE(mmsi::text, 'CS:' || upper(btrim(callsgn)))  AS vessel_uid,
+        mmsi,
+        nullif(upper(btrim(callsgn)), '')                     AS callsgn,
+        imo_no::bigint                                        AS imo_no,
+        nullif(btrim(vessel_name), '')                        AS vessel_name,
+        received_at_utc
     FROM upa_vessel_position
-    WHERE callsgn IS NOT NULL
-    ORDER BY upper(trim(callsgn)), received_at_utc DESC
+    WHERE mmsi IS NOT NULL
+       OR nullif(btrim(callsgn), '') IS NOT NULL
+),
+pos_filled AS (
+    SELECT
+        vessel_uid,
+        mmsi,
+        received_at_utc,
+        callsgn                                        AS callsgn_observed,
+        first_value(callsgn)     OVER w_callsgn        AS callsgn_lkp,
+        first_value(imo_no)      OVER w_imo            AS imo_no_lkp,
+        first_value(vessel_name) OVER w_name           AS vessel_name_lkp
+    FROM pos_src
+    WINDOW
+        w_callsgn AS (PARTITION BY vessel_uid
+                      ORDER BY (callsgn     IS NOT NULL) DESC, received_at_utc DESC),
+        w_imo     AS (PARTITION BY vessel_uid
+                      ORDER BY (imo_no      IS NOT NULL) DESC, received_at_utc DESC),
+        w_name    AS (PARTITION BY vessel_uid
+                      ORDER BY (vessel_name IS NOT NULL) DESC, received_at_utc DESC)
+),
+pos_latest AS (
+    -- vessel_uid 당 1행: 시각은 "최신 관측 시각", 식별정보는 위에서 채운 값
+    SELECT DISTINCT ON (vessel_uid)
+           vessel_uid,
+           callsgn_lkp                     AS callsgn,
+           mmsi,
+           imo_no_lkp                      AS imo_no,
+           vessel_name_lkp                 AS vessel_name,
+           received_at_utc                 AS last_position_at_utc,
+           CASE
+               WHEN callsgn_observed IS NOT NULL THEN 'current'
+               WHEN callsgn_lkp      IS NOT NULL THEN 'filled'
+               ELSE NULL
+           END                             AS callsgn_source
+    FROM pos_filled
+    ORDER BY vessel_uid, received_at_utc DESC
 ),
 pm_latest AS (
-    SELECT DISTINCT ON (upper(trim(callsgn)))
-           upper(trim(callsgn))            AS callsgn,
+    SELECT DISTINCT ON (upper(btrim(callsgn)))
+           upper(btrim(callsgn))           AS callsgn,
            vessel_name                     AS vessel_name_portmis,
            nationality_cd,
            nationality_nm,
@@ -127,16 +190,30 @@ pm_latest AS (
            is_liquid_cargo_vessel,
            port_agency_label
     FROM portmis_vessel
-    WHERE callsgn IS NOT NULL
-    ORDER BY upper(trim(callsgn)), collected_at_utc DESC
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+    ORDER BY upper(btrim(callsgn)), collected_at_utc DESC
+),
+base AS (
+    -- ① 위치 신호가 있는 선박 (callsgn 유무와 무관하게 전부 포함)
+    SELECT vessel_uid, callsgn, mmsi, imo_no, vessel_name,
+           last_position_at_utc, callsgn_source, TRUE AS has_position
+    FROM pos_latest
+
+    UNION ALL
+
+    -- ② PORT-MIS 신고만 있고 아직 항내 위치가 안 잡힌 선박 (입항 예정 등)
+    SELECT 'CS:' || m.callsgn, m.callsgn, NULL::bigint, NULL::bigint, NULL::text,
+           NULL::timestamptz, 'portmis'::text, FALSE
+    FROM pm_latest m
+    WHERE NOT EXISTS (SELECT 1 FROM pos_latest p WHERE p.callsgn = m.callsgn)
 )
 SELECT
     -- 식별 우선순위: imo → mmsi → callsgn
-    COALESCE(p.imo_no::text, p.mmsi::text, c.callsgn)   AS vessel_key,
-    c.callsgn,
-    p.imo_no,
-    p.mmsi,
-    COALESCE(p.vessel_name, m.vessel_name_portmis)      AS vessel_name,
+    COALESCE(b.imo_no::text, b.mmsi::text, b.callsgn)   AS vessel_key,
+    b.callsgn,
+    b.imo_no,
+    b.mmsi,
+    COALESCE(b.vessel_name, m.vessel_name_portmis)      AS vessel_name,
     m.nationality_cd,
     m.nationality_nm,
     m.ship_kind_cd,
@@ -144,24 +221,55 @@ SELECT
     m.ship_kind_category,
     m.is_liquid_cargo_vessel,
     m.port_agency_label,
-    p.last_position_at_utc,
-    (p.callsgn IS NOT NULL)                             AS has_position,
-    (m.callsgn IS NOT NULL)                             AS has_portmis
-FROM (SELECT callsgn FROM pos_latest
-      UNION
-      SELECT callsgn FROM pm_latest) c
-LEFT JOIN pos_latest p ON p.callsgn = c.callsgn
-LEFT JOIN pm_latest  m ON m.callsgn = c.callsgn;
+    b.last_position_at_utc,
+    b.has_position,
+    (m.callsgn IS NOT NULL)                             AS has_portmis,
+    -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
+    b.callsgn_source,
+    b.vessel_uid,
+    -- -----------------------------------------------------------------------
+    -- identity_confidence — 식별 신뢰도
+    --
+    -- ★ "정적신호가 없는 선박 = 안전한 선박" 이 아니다.
+    --   울산·온산 같은 액체화물 허브에는 대형 유조선 옆에 붙어 화물을 옮겨 싣는
+    --   소형 급유선(bunker vessel), 액체 부선(barge), 300GT 미만 연안 케미칼선이
+    --   상시 움직인다. 이들은 Class B 를 쓰거나 AIS 의무 대상이 아니어서 선종이
+    --   확인되지 않는다. 이 선박들을 "액체화물선 아님"으로 단정해 목록에서
+    --   지워버리면, 실제로는 위험물을 실은 배가 관제 화면에서 사라진다.
+    --
+    --   그래서 판정을 "액체/비액체" 2값이 아니라 아래 3상태로 남긴다.
+    --   소비 계층(대시보드·에이전트)은 UNIDENTIFIED 를 '안전'이 아니라
+    --   '미확인 위험'으로 취급하고, 관제사에게 VTS 교신 확인을 유도해야 한다.
+    --
+    --     CONFIRMED    PORT-MIS 입출항신고로 선종이 확정됨 (정본)
+    --     PARTIAL      신고는 없으나 정적신호(callsgn/IMO)로 식별은 됨
+    --     UNIDENTIFIED 정적신호 수신 이력 자체가 없음 — MMSI 만 아는 상태
+    -- -----------------------------------------------------------------------
+    CASE
+        WHEN m.callsgn IS NOT NULL                     THEN 'CONFIRMED'
+        WHEN b.callsgn IS NOT NULL OR b.imo_no IS NOT NULL THEN 'PARTIAL'
+        ELSE 'UNIDENTIFIED'
+    END                                                 AS identity_confidence
+FROM base b
+LEFT JOIN pm_latest m ON m.callsgn = b.callsgn;
 
 -- ---------------------------------------------------------------------------
 -- 2. mart.vessel_latest_position — 선박별 최신 위치 1행
 --    UPA 항내 선박위치(기본 소스)를 우선하되, 레거시 AIS 관측이 더 최신이면
 --    그것을 쓴다 (mmsi → vessel_identity 로 callsgn 역매핑). position_source
 --    컬럼으로 어느 소스의 관측인지 표시한다.
+--
+--    [MMSI-First] 예전에는 callsgn 없는 UPA 관측을 통째로 버려서 관공선·
+--    소방정·순찰선 등이 지도에서 사라졌다. 이제 MMSI 를 1차 키로 쓰고
+--    callsgn 은 vessel_identity 에서 역매핑해 보강만 한다.
+--    ★ 위치값 자체는 Stateful Filling 대상이 아니다. 신호가 끊긴 배는 마지막
+--      관측 시각(received_at_utc)과 함께 그대로 남고, 좌표를 만들어내지
+--      않는다. 소비 측은 now() - received_at_utc 로 신선도를 판단할 것.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.vessel_latest_position AS
 WITH unified AS (
-    SELECT upper(trim(callsgn))       AS callsgn,
+    SELECT COALESCE(mmsi::text, 'CS:' || upper(btrim(callsgn))) AS vessel_uid,
+           nullif(upper(btrim(callsgn)), '')  AS callsgn,
            mmsi,
            latitude,
            longitude,
@@ -172,11 +280,13 @@ WITH unified AS (
            quality_flag,
            'UPA'                      AS position_source
     FROM upa_vessel_position
-    WHERE callsgn IS NOT NULL
+    WHERE mmsi IS NOT NULL
+       OR nullif(btrim(callsgn), '') IS NOT NULL
 
     UNION ALL
 
-    SELECT vi.callsgn,
+    SELECT a.mmsi::text,
+           vi.callsgn,
            a.mmsi,
            a.latitude,
            a.longitude,
@@ -193,21 +303,24 @@ WITH unified AS (
         WHERE mmsi IS NOT NULL
         ORDER BY mmsi
     ) vi ON vi.mmsi = a.mmsi
+    WHERE a.mmsi IS NOT NULL
 )
-SELECT DISTINCT ON (COALESCE(callsgn, mmsi::text))
-       COALESCE(callsgn, mmsi::text)  AS vessel_pos_key,
-       callsgn,
-       mmsi,
-       latitude,
-       longitude,
-       sog,
-       cog,
-       nav_status_code,
-       received_at_utc,
-       quality_flag,
-       position_source
-FROM unified
-ORDER BY COALESCE(callsgn, mmsi::text), received_at_utc DESC;
+SELECT DISTINCT ON (u.vessel_uid)
+       u.vessel_uid                          AS vessel_pos_key,
+       -- 관측에 callsgn 이 안 실렸으면 vessel_identity 의 Last Known 값으로 보강
+       COALESCE(u.callsgn, vi2.callsgn)      AS callsgn,
+       u.mmsi,
+       u.latitude,
+       u.longitude,
+       u.sog,
+       u.cog,
+       u.nav_status_code,
+       u.received_at_utc,
+       u.quality_flag,
+       u.position_source
+FROM unified u
+LEFT JOIN mart.vessel_identity vi2 ON vi2.vessel_uid = u.vessel_uid
+ORDER BY u.vessel_uid, u.received_at_utc DESC;
 
 -- ---------------------------------------------------------------------------
 -- 3. mart.port_call_overview — 입항 통합 (입항건당 대표 1행)
@@ -310,11 +423,28 @@ WITH item AS (
              THEN d.val->'data' ELSE '[]'::jsonb END) AS it
     WHERE d.key LIKE 'detail%'
 ),
-clean AS (   -- HTML 이스케이프 복원 + '자료없음'/빈값 → NULL
+clean AS (
+    -- HTML 이스케이프 복원 + "값 없음"을 뜻하는 표기를 전부 NULL 로 정규화.
+    --
+    -- KOSHA MSDS 는 값이 없을 때 표기가 항목마다 다르다(실측 34종 기준):
+    --   '자료없음'  — 인화점(I14) 등에서 사용
+    --   '해당없음'  — IMDG 등급(N06) 4건, 용기등급(N08) 8건. 비위험물이라
+    --                 해당 분류 자체가 없다는 뜻이므로 NULL 이 맞다.
+    --   '-'         — 용기등급(N08) 6건. 가스류처럼 용기등급 개념이 없는 경우.
+    -- 이걸 문자열로 두면 imdg_class='해당없음' 같은 값이 소비자(백엔드·LLM)에게
+    -- 실제 등급처럼 보이고, 격리 판정 조인에서도 의미 없는 키가 된다.
     SELECT chem_id, item_code,
-           nullif(nullif(btrim(replace(replace(replace(
-               item_detail, '&lt;', '<'), '&gt;', '>'), '&amp;', '&')), ''), '자료없음') AS v
+           nullif(btrim(replace(replace(replace(replace(
+               item_detail, '&lt;', '<'), '&gt;', '>'), '&amp;', '&'), '&quot;', '"')),
+               '') AS v0
     FROM item
+),
+clean2 AS (
+    SELECT chem_id, item_code,
+           CASE WHEN v0 IN ('자료없음', '자료 없음', '해당없음', '해당 없음',
+                            '정보없음', '-', '–', 'N/A')
+                THEN NULL ELSE v0 END AS v
+    FROM clean
 ),
 pick AS (
     SELECT chem_id,
@@ -328,7 +458,7 @@ pick AS (
            max(v) FILTER (WHERE item_code = 'B0402') AS ghs_pictogram,
            max(v) FILTER (WHERE item_code = 'B0404') AS signal_word,
            max(v) FILTER (WHERE item_code = 'B0406') AS h_statements
-    FROM clean GROUP BY chem_id
+    FROM clean2 GROUP BY chem_id
 )
 SELECT
     m.chem_id,
@@ -390,14 +520,25 @@ SELECT
     ms.signal_word,
     ms.ghs_hazard,
     ms.h_statements,
-    (ms.chem_id IS NOT NULL)       AS msds_matched
+    (ms.chem_id IS NOT NULL)       AS msds_matched,
+    -- 합성 데이터 여부를 반드시 노출한다. bzentyCd 미확보로 화물은 당분간
+    -- 합성 샘플을 쓰는데, 뷰에서 이 플래그를 감추면 소비자(백엔드·대시보드·
+    -- LLM)가 실데이터로 오인한다. 뷰에서 걸러내지 않는 이유는 시연에 합성
+    -- 데이터가 필요하기 때문 — 걸러내는 대신 "표시"해서 판단을 넘긴다.
+    cm.is_synthetic,
+    cm.cargo_basis
 FROM upa_cargo_manifest cm
 LEFT JOIN mart.msds_flat ms
   ON cm.dg_un_no IS NOT NULL
- -- UN 번호 표기 편차 정규화 후 조인: "UN1972" / "1972" / "1972.0"(숫자형 적재
- -- 잔재) 를 모두 "1972" 로 통일. 정규화 없이 원문 비교하면 매칭 누락 발생.
- AND nullif(regexp_replace(upper(trim(ms.dg_un_no::text)), '^UN|\.0$', '', 'g'), '')
-   = nullif(regexp_replace(upper(trim(cm.dg_un_no::text)), '^UN|\.0$', '', 'g'), '');
+ -- UN 번호 정규화 후 조인.
+ -- UN 번호는 국제 표준상 항상 4자리 숫자(0004~3548)라, 표기가 어떻게 오든
+ -- 첫 4자리 숫자만 뽑으면 안전하게 정규화된다. 실무 표기 편차 실측:
+ --   "1972" / "UN1972" / "un1972" / "UN 1972" / "UN-1972" / "(UN1972)"
+ --   "1972.0" / "1972.00"  ← 숫자형으로 적재됐다가 문자열화된 잔재
+ -- 이전 방식('^UN|\.0$' 치환)은 공백·괄호·하이픈·소수점 2자리를 놓쳤다.
+ -- (숫자만 남기는 '[^0-9]' 방식은 "1972.0"을 "19720"으로 만들어 쓸 수 없다.)
+ AND nullif((regexp_match(ms.dg_un_no::text, '([0-9]{4})'))[1], '')
+   = nullif((regexp_match(cm.dg_un_no::text, '([0-9]{4})'))[1], '');
 
 -- ---------------------------------------------------------------------------
 -- 5. mart.weather_now — 환경 최신 (항상 정확히 1행)
@@ -424,11 +565,105 @@ SELECT
     v.wave_height_sig_m,
     v.wave_height_max_m,
     v.wave_period_s,
-    v.wave_dir_deg
+    v.wave_dir_deg,
+    -- ↓ 실무 반영 추가 (CREATE OR REPLACE 제약상 맨 뒤에 붙인다)
+    --   돌풍(gust): 계류삭 장력은 평균풍속이 아니라 순간최대풍속에 끊어진다.
+    --   조류(current): 액체부두 접·이안에서 조류는 풍속만큼 중요한 제약이다.
+    --     특히 울산 본항·온산 수로는 창·낙조류 방향이 접안 조종에 직접 영향.
+    t.gust_ms,
+    t.current_speed_cms,
+    t.current_dir_deg
 FROM (SELECT 1) AS anchor
 LEFT JOIN (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
 LEFT JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
 LEFT JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
+
+-- ---------------------------------------------------------------------------
+-- 5-1. mart.berth_draught_check — 조위 반영 가용수심 · UKC 판정
+--
+-- [왜 필요한가 — 실무와 어긋나던 부분]
+--   기존 흘수 판정은 "선박 흘수 < 부두 수심" 이었다. 항만 실무는 그렇지 않다.
+--
+--   (1) 부두 명세의 수심은 **해도기준면(Chart Datum) 기준**이다. 해도기준면은
+--       약최저저조위이므로, 실제 그 시각의 가용수심은 항상 그보다 크다.
+--           가용수심 = 해도수심 + 그 시각 조위
+--       조위를 빼먹으면 "만조 때만 접안 가능한 배"를 영구 접안불가로 오판한다.
+--       실제로 대형 유조선은 이 조위 여유에 맞춰 접안 시각을 잡는다.
+--
+--   (2) 흘수와 가용수심이 같으면 되는 게 아니다. 선체 아래에 **UKC(Under Keel
+--       Clearance, 용골하 여유수심)** 가 남아야 한다. 항주파·선체 침하(squat)·
+--       해저 기복·측심 오차를 흡수하는 여유다.
+--
+--   ※ UKC 요구치는 법정 수치가 아니다. 여기서는 통상 관행값(흘수의 10%)을
+--     기본으로 두되, 터미널·항만별로 다르므로 파라미터로 분리해 두었다.
+--     울산항 각 터미널 운영규정을 입수해 확정해야 한다(미확보 — 한계로 보고).
+--
+--   ※ AIS drft(최대정적흘수)는 선원이 입력하는 값이며 트림(선수·선미 흘수 차)을
+--     반영하지 않는다. 실제 최대흘수는 이보다 클 수 있다 — 보수적으로 볼 것.
+--
+-- 판정:
+--   OK           UKC 여유 충족
+--   MARGINAL     양수이나 요구 UKC 미달 — 조위창(tidal window) 조정 필요
+--   NOT_ALLOWED  가용수심 ≤ 흘수 — 착저 위험, 접안 불가
+--   UNKNOWN      흘수 또는 부두 수심 미상
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.berth_draught_check AS
+WITH tide AS (
+    SELECT tide_level_cm, observed_at_utc
+    FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1
+),
+berth AS (
+    -- 해도기준면 수심(m). 현재는 SK 부두만 명세를 확보했다.
+    -- 부두 명세를 더 확보하면 이 목록을 시드 테이블로 옮길 것.
+    SELECT * FROM (VALUES
+        ('SK1부두', 7.5), ('SK2부두', 8.0), ('SK3부두', 12.0), ('SK4부두', 10.0),
+        ('SK5부두', 11.0), ('SK6부두', 15.0), ('SK7부두', 15.0), ('SK8부두', 18.0)
+    ) AS t(facility_name, chart_depth_m)
+),
+vessel AS (
+    SELECT DISTINCT ON (upper(btrim(callsgn)))
+           upper(btrim(callsgn)) AS callsgn, draught, received_at_utc
+    FROM upa_vessel_position
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL AND draught IS NOT NULL
+    ORDER BY upper(btrim(callsgn)), received_at_utc DESC
+),
+pc AS (
+    -- 선석 배정은 UPA 운항관제(upa_port_call)에 있다. port_call_overview 는
+    -- PORT-MIS 신고를 기준행으로 삼으므로, 신고가 아직 없는 배(접안은 했으나
+    -- 신고 미연계)가 빠진다. 흘수 판정은 접안 사실만 있으면 해야 하므로
+    -- 여기서는 upa_port_call 을 직접 본다.
+    SELECT DISTINCT ON (upper(btrim(callsgn)))
+           upper(btrim(callsgn)) AS callsgn, facility_name, arrival_at_utc
+    FROM upa_port_call
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+      AND departure_at_utc IS NULL          -- 아직 접안 중인 건만
+    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC
+)
+SELECT
+    pc.callsgn,
+    pc.facility_name,
+    b.chart_depth_m,
+    (SELECT tide_level_cm FROM tide) / 100.0            AS tide_level_m,
+    b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                                                        AS available_depth_m,
+    v.draught                                           AS vessel_draught_m,
+    round((b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+           - v.draught)::numeric, 2)                    AS ukc_m,
+    round((v.draught * 0.10)::numeric, 2)               AS ukc_required_m,
+    CASE
+        WHEN v.draught IS NULL OR b.chart_depth_m IS NULL THEN 'UNKNOWN'
+        WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0)
+             <= v.draught                                THEN 'NOT_ALLOWED'
+        WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+              - v.draught) < v.draught * 0.10            THEN 'MARGINAL'
+        ELSE 'OK'
+    END                                                 AS draught_verdict,
+    (SELECT observed_at_utc FROM tide)                  AS tide_observed_at_utc,
+    v.received_at_utc                                   AS draught_observed_at_utc,
+    pc.arrival_at_utc
+FROM pc
+JOIN berth  b ON b.facility_name = pc.facility_name
+LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
 -- 6. mart.dashboard_current — '한 줄 조회' (대시보드·에이전트 진입점)
@@ -448,10 +683,12 @@ WITH msds_by_vessel AS (
 )
 SELECT
     -- [선박 식별]
-    vi.vessel_key,
+    -- vessel_identity 에 아직 없는 선박(레거시 AIS 관측만 있는 경우)도 최소한
+    -- 위치 소스가 들고 있는 MMSI/키는 살려 둔다 — NULL 행이 생기지 않게.
+    COALESCE(vi.vessel_key, p.vessel_pos_key)           AS vessel_key,
     p.callsgn,
     vi.imo_no,
-    vi.mmsi,
+    COALESCE(vi.mmsi, p.mmsi)                           AS mmsi,
     vi.vessel_name,
     vi.ship_kind_nm,
     vi.is_liquid_cargo_vessel,
@@ -486,7 +723,18 @@ SELECT
     wn.visibility_m,
     wn.tide_level_cm,
     wn.wave_height_sig_m,
-    wn.weather_observed_at_utc
+    wn.weather_observed_at_utc,
+    -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
+    -- 식별 신뢰도 — UNIDENTIFIED 는 '안전'이 아니라 '미확인 위험'으로 표시할 것.
+    vi.identity_confidence,
+    vi.callsgn_source,
+    -- 풍향·돌풍: 이안풍(offshore)이면 계류삭 장력이 급증하고, 계류 판단은
+    -- 평균풍속이 아니라 순간최대풍속(gust)으로 한다.
+    wn.wind_dir_deg,
+    wn.gust_ms,
+    -- 조류: 액체부두 접·이안 조종의 직접 제약.
+    wn.current_speed_cms,
+    wn.current_dir_deg
 FROM mart.vessel_latest_position p
 CROSS JOIN LATERAL (
     SELECT CASE
@@ -498,7 +746,11 @@ CROSS JOIN LATERAL (
             ))
     END AS distance_to_ulsan_nm
 ) d
-LEFT JOIN mart.vessel_identity     vi  ON vi.callsgn = p.callsgn
+-- [MMSI-First] 식별 조인을 callsgn 이 아니라 vessel_uid(=MMSI 기반)로 건다.
+-- callsgn 을 한 번도 송출하지 않는 관공선·소방정·예부선도 선명·MMSI 를 달고
+-- 대시보드에 표시되어야 하기 때문이다. 반대로 입항신고·화물은 callsgn 이
+-- 있어야만 존재하는 정보라 그대로 callsgn 조인을 유지한다.
+LEFT JOIN mart.vessel_identity     vi  ON vi.vessel_uid = p.vessel_pos_key
 LEFT JOIN mart.port_call_overview  pco ON pco.callsgn = p.callsgn
 LEFT JOIN msds_by_vessel           mv  ON mv.callsgn = p.callsgn
 LEFT JOIN mart.weather_now         wn  ON TRUE;

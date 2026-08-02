@@ -404,15 +404,25 @@ def build_master_mart():
     # 관측시각" 자연키로 UPSERT 해 같은 스냅샷은 최신 enrich 로 갱신되게 한다.
     import hashlib
 
+    # pandas 3.0 부터 .astype(str) 이 결측값을 "nan" 문자열이 아니라 실제 null 로
+    # 남겨둔다(이전 버전과 동작 변경). 그 null 이 문자열 이어붙이기(+)를 타고
+    # 전파되면 최종 값이 float(NaN) 이 되어 .encode() 에서 AttributeError 가 난다.
+    # astype(str) 직후 매번 명시적으로 결측을 문자열로 고정해 버전에 관계없이
+    # 동일하게 동작하도록 한다.
+    def _str_col(s: pd.Series, na_token: str) -> pd.Series:
+        s = s.astype(str)
+        return s.mask(s.isna() | s.isin(["nan", "NaT", "None"]), na_token)
+
     if "callsgn" in mart.columns:
-        vessel_id = mart["callsgn"].astype(str).str.strip().str.upper()
+        vessel_id = _str_col(mart["callsgn"], "NAN").str.strip().str.upper()
     else:
         vessel_id = pd.Series("", index=mart.index)
     invalid = vessel_id.isin(["", "NAN", "NONE"])
     if "mmsi" in mart.columns:
-        vessel_id = vessel_id.where(~invalid, mart["mmsi"].astype(str))
+        vessel_id = vessel_id.where(~invalid, _str_col(mart["mmsi"], "NAN"))
+    received_str = _str_col(mart["received_at_utc"], "NAT")
     mart["mart_uid"] = (
-        (vessel_id + "|" + mart["received_at_utc"].astype(str))
+        (vessel_id + "|" + received_str)
         .map(lambda x: hashlib.md5(x.encode("utf-8")).hexdigest())
     )
 
