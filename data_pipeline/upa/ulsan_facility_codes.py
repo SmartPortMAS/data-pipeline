@@ -166,10 +166,15 @@ FACILITY_CODES = {
     "WAW-01": ("정박지-W1", None, None),
 }
 
+# 액체(벌크) 화물 취급을 뜻하는 키워드.
+#   "가스" 포함 — LPG·LNG 는 액화가스이고 본 프로젝트의 하역 스케줄링 대상이다.
+#   가스부두(MBL-01)를 비액체로 분류하면 LPG/LNG 선이 대상에서 빠진다.
+LIQUID_CARGO_KEYWORDS = ("유류", "액체", "액체화학", "액체화물", "가스")
+
 # 취급화물에 액체 키워드가 있는 시설코드 (부두/돌핀 — 정박지는 취급화물 개념이 없음)
 LIQUID_FACILITY_CODES = {
     code for code, (_, _, cargo) in FACILITY_CODES.items()
-    if cargo and any(k in cargo for k in ("유류", "액체", "액체화학", "액체화물"))
+    if cargo and any(k in cargo for k in LIQUID_CARGO_KEYWORDS)
 }
 
 
@@ -180,3 +185,88 @@ def lookup(code: str):
 
 def is_liquid_facility(code: str) -> bool:
     return str(code).strip().upper() in LIQUID_FACILITY_CODES
+
+
+# ===========================================================================
+# 시설명 정규화 — 소스마다 부두 이름이 다르게 온다
+# ===========================================================================
+# 실측으로 확인된 불일치:
+#   UPA 운항관제(upa_port_call.facility_name) : "울산본항 제4부두"
+#   PORT-MIS CODE BOOK (위 FACILITY_CODES)    : "4부두"        (코드 MB4-01)
+#   우리 부두 명세·합성 데이터                 : "SK1부두", "정일1부두" …
+#
+# 이름이 다르니 조인이 통째로 실패하고, 그 결과 "배가 어느 부두에 붙었는지"를
+# 알면서도 그 부두가 액체부두인지 판정하지 못한다. 계선시설 기반 화물 확정이
+# 막혀 있던 실제 원인 중 하나가 이것이다.
+#
+# 아래 정규화는 완전한 매핑표가 아니라 **현재까지 확인된 규칙**이다.
+# UPA 선석시설 API(collect_berth_facility)를 수집하면 코드↔명칭 전량 대조가
+# 가능하다. 그전까지는 미매칭을 조용히 넘기지 않고 None 을 돌려주어
+# 호출 측에서 "미상"으로 드러나게 한다.
+# ---------------------------------------------------------------------------
+import re as _re  # noqa: E402
+
+# UPA 표기 접두어(항·지구명) — 제거 대상
+_AREA_PREFIXES = ("울산본항", "온산항", "미포항", "울산신항", "신항", "본항")
+
+# 별칭 → PORT-MIS CODE BOOK 시설명 접두
+_ALIASES = {
+    "S-OIL": "S-OIL", "S-Oil": "S-OIL", "에스오일": "S-OIL",
+    "정일스톨트헤븐울산신항": "정일", "정일스톨트헤븐": "정일",
+    "현대오일터미널신항": "현대오일터미널신항",
+    "현대오일터미널 신항": "현대오일터미널신항",
+    "대한유화": "대한유화",
+}
+
+
+def normalize_facility_name(name) -> str | None:
+    """
+    소스별 부두 표기를 비교 가능한 형태로 정규화한다.
+      "울산본항 제4부두"              → "4부두"
+      "SK 3부두"                      → "SK3부두"
+      "S-Oil 1부두"                   → "S-OIL1부두"
+      "정일스톨트헤븐울산신항 3부두"  → "정일3부두"
+    부두/돌핀/정박지류로 보이지 않으면 None (호출 측에서 '미상' 처리).
+    """
+    if not name:
+        return None
+    s = str(name).strip()
+    for p in _AREA_PREFIXES:
+        if s.startswith(p):
+            s = s[len(p):].strip()
+            break
+    for k, v in _ALIASES.items():
+        if s.upper().startswith(k.upper()):
+            s = v + s[len(k):]
+            break
+    s = s.replace("제", "").replace(" ", "")
+    if not _re.search(r"부두|돌핀|정박지|부이|안벽|호안|작업장", s):
+        return None
+    return s.upper()
+
+
+def cargo_for_facility_name(name):
+    """
+    시설명 → 공식 취급화물. 정규화 후 CODE BOOK 시설명과 대조한다.
+    반환: (표준시설명, 취급화물). 못 찾으면 (정규화명 또는 None, None).
+    """
+    norm = normalize_facility_name(name)
+    if norm is None:
+        return None, None
+    for _code, (fname, _sub, cargo) in FACILITY_CODES.items():
+        if normalize_facility_name(fname) == norm:
+            return fname, cargo
+    return norm, None
+
+
+def is_liquid_facility_name(name):
+    """
+    시설명으로 액체부두 여부 판정.
+
+    True/False 뿐 아니라 **None(판정 불가)** 을 돌려준다.
+    모르는 것을 False(=비액체, 안전)로 뭉개면 위험물이 화면에서 사라진다.
+    """
+    _std, cargo = cargo_for_facility_name(name)
+    if cargo is None:
+        return None
+    return any(k in cargo for k in LIQUID_CARGO_KEYWORDS)
