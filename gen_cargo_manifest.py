@@ -28,26 +28,39 @@ UPA 통합화물 API(getIntgCagInfo)는 업체코드(bzentyCd)가 필수라 자�
 ----
   · 전 행 is_synthetic=True. 실데이터가 아니다.
   · bl_no·MRN·수량은 합성값이며, 화물 대분류만 실선종에 근거한다(cargo_basis 참고).
-  · 혼재금지 판정 규칙(SEGREGATION_RULES)은 실무상 대표 조합만 담은 **잠정** 표다.
-    IMDG Code 7.2.4 segregation table 원문 대조는 WBS 2.6 에서 확정할 것.
+  · (화물명, UN, IMDG Class, 용기등급) 조합은 자유롭게 만들지 않는다.
+    data_pipeline/reference/imdg_dgl.py 의 DGL 참조표를 유일한 출처로 삼고,
+    생성 직후 전 행을 강제 검증한다. 불일치가 하나라도 있으면 생성이 실패한다.
+    → 교차검증 지적 "합성 위험물 데이터는 화학적 교차검증 없으면 가짜" 대응.
+  · 부차위험(subsidiary risk)은 스키마 39컬럼에 칸이 없어 manifest 에 담지 않는다.
+    판정 시점에 imdg_dgl.subsidiary_risks() / mart.msds_flat 으로 조회할 것.
+    예) 메탄올 UN1230 은 Class 3 이지만 부차위험 6.1(독성)이 있다.
+  · 혼재금지 규칙(SEGREGATION_RULES)의 등급 조합은 IMDG 7.2 일반격리표 정본과
+    일치하지만, 그것을 **인접 선석 동시하역**에 적용하는 것은 규정이 아니라
+    보수적 스크리닝 차용이다. rule_authority 컬럼으로 그 사실을 명시한다.
 
 실행
 ----
-  py gen_cargo_manifest.py                # v2·v3 모두 생성, 파이프라인엔 v3 반영
-  py gen_cargo_manifest.py --no-violations # 파이프라인엔 v2(정상)만 반영
+  py gen_cargo_manifest.py                 # 정상+위반 생성, 파이프라인 반영
+  py gen_cargo_manifest.py --no-violations # 파이프라인엔 정상 케이스만 반영
 """
 import argparse
 import csv
 import os
 import random
+import sys
 
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from data_pipeline.reference import imdg_dgl  # noqa: E402
 
 random.seed(20260727)
 STAGING = os.path.join("data", "staging")
 SHARE_DIR = "samples"
 OUT_PIPELINE = os.path.join(STAGING, "upa_cargo_manifest_stg.csv")
-OUT_V2 = os.path.join(SHARE_DIR, "upa_cargo_manifest_stg_v2_synthetic.csv")
+# 정상 365행만 담던 v2 파일은 v3 의 cargo_basis='PORT-MIS 실선종 기반' 부분집합과
+# 동일해 중복이므로 제거했다. 정상만 필요하면 v3 에서 필터링할 것.
 OUT_V3 = os.path.join(SHARE_DIR, "upa_cargo_manifest_stg_v3_synthetic.csv")
 OUT_SCENARIO = os.path.join(SHARE_DIR, "violation_scenarios.csv")
 OUT_WEATHER = os.path.join(SHARE_DIR, "violation_weather_obs_synthetic.csv")
@@ -73,24 +86,35 @@ SCHEMA_COLUMNS = [
 
 # ---------------------------------------------------------------------------
 # 선종(PORT-MIS 실신고) → 화물 계열.
-# UN 번호·IMDG 등급·용기등급은 KOSHA MSDS 실측값(mart.msds_flat 로 검증).
-#   (화물명, UN번호, IMDG등급, 용기등급)
+#
+# ★ 값을 여기 직접 적지 않는다. imdg_dgl.SHIP_KIND_ALLOWED_UN 이 정한 UN 번호만
+#   쓰고, 화물명·Class·용기등급은 DGL 참조표에서 끌어온다. 손으로 적으면
+#   UN↔Class↔PG 삼각관계가 어긋나도 아무도 모른 채 CSV 가 나온다.
+#
+# [정정 이력 2026-08-02 — DGL 대조로 드러난 실제 오류 3건]
+#   1) 원유운반선에 UN1993(FLAMMABLE LIQUID, N.O.S. — 총칭 엔트리)을 쓰고 있었다.
+#      원유의 고유 엔트리는 UN1267(PETROLEUM CRUDE OIL)이다. 총칭 UN 을 쓰면
+#      MSDS 매칭이 엉뚱한 물질로 붙는다.
+#   2) LNG운반선에 UN1971(METHANE, COMPRESSED — 압축가스)을 쓰고 있었다.
+#      LNG 는 냉동액화이므로 UN1972(METHANE, REFRIGERATED LIQUID)가 맞다.
+#   3) 메탄올(UN1230)의 부차위험 6.1(독성)이 어디에도 없었다. 스키마에 칸이
+#      없으므로 DGL 참조표에 담고 판정 시점에 조회하도록 했다.
+#   → 세 건 모두 "39컬럼 정합"만으로는 잡히지 않는 결함이다. 스키마 정합과
+#     내용 정합은 별개라는 것이 이 정정의 교훈이다.
 # ---------------------------------------------------------------------------
+def _cargo_options(ship_kind: str) -> list:
+    """선종 → [(화물명, UN, Class, 용기등급)] — 전부 DGL 참조표에서 유도."""
+    out = []
+    for un in imdg_dgl.SHIP_KIND_ALLOWED_UN.get(ship_kind, ()):
+        e = imdg_dgl.DGL[un]
+        pg = {"I": "Ⅰ", "II": "Ⅱ", "III": "Ⅲ"}.get(
+            e.packing_groups[0] if e.packing_groups else "", "해당없음")
+        out.append((e.psn_ko, e.un_no, e.imdg_class, pg))
+    return out
+
+
 CARGO_BY_SHIP_KIND = {
-    "원유운반선":          [("석유(PETROLEUM)", "1993", "3", "해당없음")],
-    "석유제품운반선":      [("러버 솔벤트", "1268", "3", "Ⅰ"), ("디젤 연료", "1202", "3", "Ⅲ"),
-                            ("가솔린", "1203", "3", "Ⅱ"), ("케로젠", "1223", "3", "Ⅲ")],
-    "석유제품/케미칼겸용":  [("러버 솔벤트", "1268", "3", "Ⅰ"), ("벤젠", "1114", "3", "Ⅱ"),
-                            ("톨루엔", "1294", "3", "Ⅱ")],
-    "케미칼운반선":        [("벤젠", "1114", "3", "Ⅱ"), ("톨루엔", "1294", "3", "Ⅱ"),
-                            ("크실렌", "1307", "3", "Ⅲ"), ("메틸 알코올", "1230", "3", "Ⅱ"),
-                            ("스티렌", "2055", "3", "Ⅲ"), ("아크릴로니트릴", "1093", "3", "Ⅰ"),
-                            ("테트라하이드로푸란", "2056", "3", "Ⅱ"),
-                            ("1,2-에폭시프로판", "1280", "3", "Ⅰ")],
-    "케미칼가스운반선":    [("프로필렌", "1077", "2.1", "-"), ("1,3-부타디엔", "1010", "2.1", "-")],
-    "LPG운반선":           [("프로페인", "1978", "2.1", "해당없음"), ("부탄", "1011", "2.1", "-")],
-    "LNG운반선":           [("메테인", "1971", "2.1", "해당없음")],
-    "기타유조선":          [("석유(PETROLEUM)", "1993", "3", "해당없음")],
+    k: _cargo_options(k) for k in imdg_dgl.SHIP_KIND_ALLOWED_UN
 }
 CARGO_BY_DRY_KIND = {
     "산물선": "곡물/광석", "양곡운반선": "양곡", "원목운반선": "원목",
@@ -100,9 +124,10 @@ CARGO_BY_DRY_KIND = {
     "세미컨테이너선": "컨테이너화물",
 }
 DEFAULT_DRY_CARGO = "일반잡화"
-FALLBACK_LIQUID = [("석유(PETROLEUM)", "1993", "3", "해당없음"),
-                   ("벤젠", "1114", "3", "Ⅱ"),
-                   ("프로페인", "1978", "2.1", "해당없음")]
+# 선종을 모르는 액체선 폴백. 물질이 특정되지 않았으므로 총칭 엔트리 UN1993 이
+# 여기서는 오히려 정확한 선택이다(원유운반선에 쓰면 틀리지만, 미상 선박에는 맞다).
+FALLBACK_LIQUID = [_cargo_options("기타유조선")[i] for i in (0, 1)] + \
+                  [_cargo_options("케미칼운반선")[1]]
 
 # 액체화물 부두 / 일반 부두 (울산항 계류시설 코드표의 취급화물 기준)
 LIQUID_FACILITIES = [
@@ -128,25 +153,80 @@ ADJACENT_PAIRS = [
 ]
 
 # ---------------------------------------------------------------------------
-# 혼재금지 규칙 (IMDG 등급 조합)
-#   ※ 실무상 격리가 요구되는 대표 조합만 담은 **잠정** 표.
-#     IMDG Code 7.2.4 segregation table 원문 대조는 WBS 2.6 에서 확정한다.
-#     현재 MSDS 34종에 존재하는 등급: 2.1 / 2.3 / 3 / 6.1 / 8 / 9
+# 혼재금지 규칙 (IMDG Class 조합)
+#
+# 정본: data_pipeline/loaders/imdg_segregation_loader.py 의
+#       IMDG_GENERAL_SEGREGATION_TABLE (IMDG Code Chapter 7.2 일반 격리표).
+#       그 모듈은 neo4j 패키지를 import 하므로 여기서는 직접 참조하지 않고,
+#       우리 34종에 실제로 등장하는 Class 조합만 발췌해 둔다.
+#       ※ 표를 고칠 일이 생기면 반드시 정본 쪽을 고치고 여기로 옮겨 적을 것.
+#
+# 격리 코드: 1=Away from(수평 3m 이상)  2=Separated from(다른 격창)
+#            3=Separated by a complete compartment  4=Separated longitudinally
+#            X=일반 규정 없음(개별 위험물목록 확인 필요)
+#
+# [정정 이력 2026-07-31]
+#   초기 잠정 표에는 8↔3(부식성↔인화성액체), 2.3↔2.1(독성가스↔인화성가스)을
+#   혼재금지로 넣었으나, 공식 표와 대조하니 **둘 다 X(일반 규정 없음)** 이었다.
+#   실무 직관에 기댄 추정이었고 근거가 없어 제거한다. 우리 34종에 등장하는
+#   Class(2.1 / 2.3 / 3 / 6.1 / 8 / 9) 중 일반 격리 규정이 있는 조합은 아래 3개뿐.
+#
+# ★★ [적용 범위에 대한 정직한 고지 — 2026-08-02 추가] ★★
+#   아래 등급 조합과 격리코드는 IMDG 7.2 일반격리표 원문과 일치한다. 그러나
+#   IMDG 7.2 는 **선박 내부(화물창·갑판)의 적재(stowage)** 를 규율하는 해상
+#   규정이지, 부두 A 와 부두 B 사이의 거리를 규율하는 규정이 **아니다**.
+#
+#   국내 법령 계보도 마찬가지다:
+#     「선박안전법」 제41조
+#       → 「위험물 선박운송 및 저장규칙」(해수부령) 제20조 (위험물의 격리)
+#         → 「위험물 선박운송 기준」(해수부 고시) 별표19 (격리 기준)
+#     — 이 계보 전체가 '선박에 실은 위험물' 을 대상으로 한다.
+#
+#   따라서 본 프로젝트는 이 표를 **법적 위반 판정**에 쓰지 않는다.
+#   "인접 선석에서 동시 하역 중인 두 화물이, 만약 한 배에 실렸다면 격리 대상인가"
+#   를 묻는 **보수적 스크리닝 트리거**로만 쓴다. 트리거가 걸리면 관제사에게
+#   "확인 필요"를 띄우는 것이지 "위법"이라고 말하지 않는다.
+#   이 구분을 데이터에도 남기려고 violation_scenarios.csv 에 rule_authority
+#   컬럼을 두어 '법정근거' 와 '차용-스크리닝' 을 구분한다.
+#
+#   액체 벌크 터미널의 실제 동시작업(SIMOPS) 기준은 일반표가 아니라
+#   ISGOTT(OCIMF/ICS) 기반의 터미널별 운영규정으로 정해진다. 확정 근거가
+#   필요하면 울산항 각 터미널 운영규정을 입수해야 한다(미확보 — 한계로 보고).
 # ---------------------------------------------------------------------------
 SEGREGATION_RULES = [
-    ("8", "3", "부식성(산) ↔ 인화성 액체 — 산이 유기물과 반응해 발열·발화 위험"),
-    ("8", "2.1", "부식성(산) ↔ 인화성 가스 — 산 누출 시 가스 인화 위험"),
-    ("2.3", "2.1", "독성 가스 ↔ 인화성 가스 — 동시 누출 시 중독·인화 복합 위험"),
-    ("5.1", "3", "산화성 물질 ↔ 인화성 액체 — 산화제가 연소를 급격히 촉진"),
+    ("2.1", "3", "2", "인화성 가스 ↔ 인화성 액체 — Separated from(다른 격창)"),
+    ("2.3", "3", "2", "독성 가스 ↔ 인화성 액체 — Separated from(다른 격창)"),
+    ("2.1", "8", "1", "인화성 가스 ↔ 부식성 물질 — Away from(수평 3m 이상)"),
 ]
 
-# 위반 케이스 전용 화물 (평상시 배정 목록에는 없는 등급을 의도적으로 투입)
+# 규칙 권위 등급 — violation_scenarios.csv 의 rule_authority 컬럼에 쓴다.
+AUTHORITY_STATUTE = "법정근거"          # 국내 법령·고시에 직접 근거
+AUTHORITY_BORROWED = "차용-스크리닝"    # 해상 규정을 항만 상황에 보수적으로 차용
+AUTHORITY_OPERATIONAL = "운영기준"      # 터미널·항만 운영 실무 기준
+
+# 위반 케이스 전용 화물 — DGL 참조표에서 유도(손으로 적지 않는다)
+def _v(un: str):
+    e = imdg_dgl.DGL[un]
+    pg = {"I": "Ⅰ", "II": "Ⅱ", "III": "Ⅲ"}.get(
+        e.packing_groups[0] if e.packing_groups else "", "해당없음")
+    return (e.psn_ko, e.un_no, e.imdg_class, pg)
+
+
 VIOLATION_CARGO = {
-    "황산":     ("황산", "1830", "8", "Ⅱ"),
-    "암모니아": ("암모니아", "1005", "2.3", "-"),
+    "황산":     _v("1830"),
+    "암모니아": _v("1005"),
+    "프로페인": _v("1978"),
 }
 
-# SK 부두 수심(m) — UPA 부두 명세. 흘수 초과 판정용.
+# UKC(Under Keel Clearance, 용골하 여유수심) 요구 비율.
+#   실무 관행값(흘수의 10%)이며 법정 수치가 아니다. 항만·선종·해저저질에 따라
+#   달라지므로 울산항 각 터미널 운영규정으로 확정해야 한다(미확보 — 한계로 보고).
+UKC_RATIO = 0.10
+
+# SK 부두 수심(m) — UPA 부두 명세.
+#   ★ 이 값은 **해도기준면(Chart Datum) 기준 수심**이다. 그 시각의 실제
+#     가용수심은 여기에 조위(tide_obs.tide_level_cm)를 더해야 나온다.
+#     흘수 판정에 조위를 빼먹으면 만조에만 접안 가능한 배를 영구 불가로 오판한다.
 BERTH_DEPTH_M = {
     "SK1부두": 7.5, "SK2부두": 8.0, "SK3부두": 12.0, "SK4부두": 10.0,
     "SK5부두": 11.0, "SK6부두": 15.0, "SK7부두": 15.0, "SK8부두": 18.0,
@@ -173,11 +253,16 @@ def _read(name):
     return pd.read_csv(p, encoding="utf-8-sig") if os.path.exists(p) else None
 
 
-def check_staging_freshness(pm):
+def check_staging_freshness(pm, allow_stale: bool = False):
     """PORT-MIS staging 이 구 선종매핑으로 만들어진 것인지 검사한다.
 
     낡은 staging 을 쓰면 액체화물선이 "화물/시멘트선" 등으로 남아 있어 화물이
-    거의 배정되지 않는다. 조용히 잘못된 CSV 가 나오는 걸 막기 위해 경고한다.
+    거의 배정되지 않는다.
+
+    [2026-08-02 강화] 예전에는 경고만 찍고 그대로 생성했다. 그 결과 실제로
+    "정상 6행 / 추정 359행" 짜리 사실상 쓸모없는 CSV 가 조용히 만들어져 기존
+    샘플을 덮어썼다. 경고를 눈으로 읽고 넘어가는 것에 의존하면 안 된다.
+    이제는 **생성을 중단**하고, 정말 필요하면 --allow-stale 로 명시하게 한다.
     """
     if pm is None or "ship_kind_category" not in pm.columns:
         return
@@ -185,21 +270,29 @@ def check_staging_freshness(pm):
     if not found:
         return
     n = int(pm["ship_kind_category"].isin(found).sum())
-    print("!" * 70)
-    print("[경고] PORT-MIS staging 이 낡았습니다 — 구 선종매핑으로 생성된 파일입니다.")
-    print(f"       구 라벨 발견: {', '.join(sorted(found))}  ({n}행)")
-    print("       구 매핑은 51=일반화물선·52=화물/시멘트선·53=목재선 이었고,")
-    print("       공식 CODE BOOK 기준으로는 51=원유·52=석유제품·53=케미칼 입니다.")
-    print("       → 이대로 생성하면 액체화물이 거의 배정되지 않습니다.")
-    print()
-    print("       [해결] PORT-MIS 를 다시 수집·전처리한 뒤 이 스크립트를 재실행하세요:")
-    print("         py -m data_pipeline.run_pipeline portmis --skip-db \\")
-    print("            --start YYYYMMDD --end YYYYMMDD")
-    print("!" * 70)
-    print()
+    msg = [
+        "!" * 70,
+        "[중단] PORT-MIS staging 이 낡았습니다 — 구 선종매핑으로 생성된 파일입니다.",
+        f"       구 라벨 발견: {', '.join(sorted(found))}  ({n}행)",
+        "       구 매핑은 51=일반화물선·52=화물/시멘트선·53=목재선 이었고,",
+        "       공식 CODE BOOK 기준으로는 51=원유·52=석유제품·53=케미칼 입니다.",
+        "       → 이대로 생성하면 액체화물이 거의 배정되지 않아 무의미한 CSV 가 나옵니다.",
+        "",
+        "       [해결] PORT-MIS 를 다시 수집·전처리한 뒤 이 스크립트를 재실행하세요:",
+        "         py -m data_pipeline.run_pipeline portmis --skip-db \\",
+        "            --start YYYYMMDD --end YYYYMMDD",
+        "",
+        "       그래도 지금 상태로 생성하려면: py gen_cargo_manifest.py --allow-stale",
+        "!" * 70,
+    ]
+    if allow_stale:
+        msg[1] = "[경고] --allow-stale 지정 — 낡은 staging 으로 그대로 생성합니다."
+        print("\n".join(msg) + "\n")
+        return
+    raise SystemExit("\n".join(msg))
 
 
-def build_vessel_pool():
+def build_vessel_pool(allow_stale: bool = False):
     """실제 staging → (callsgn, vessel_name, ship_kind_category, is_liquid, estimated).
 
     ship_kind_category 는 PORT-MIS 실신고 값 — 여기서 화물 계열이 정해진다.
@@ -208,7 +301,7 @@ def build_vessel_pool():
     """
     pool = []
     pm = _read("portmis_vessel_stg.csv")
-    check_staging_freshness(pm)
+    check_staging_freshness(pm, allow_stale)
     if pm is not None and "callsgn" in pm.columns:
         pm = pm.dropna(subset=["callsgn"]).drop_duplicates(subset=["callsgn"])
         for _, r in pm.iterrows():
@@ -332,36 +425,55 @@ def inject_violations(rows):
         seq += 1
         return r
 
-    # ── V-SEG-01 : 혼재금지 (부식성 산 ↔ 인화성 액체, 인접 선석) ────────────
-    a, b = ADJACENT_PAIRS[0]                       # 정일1부두 / 정일2부두
-    r1 = add(VIOLATION_CARGO["황산"], "VIO001", "SULFURIC PIONEER", a, "위반주입-혼재금지")
-    r2 = add(("벤젠", "1114", "3", "Ⅱ"), "VIO002", "BENZENE STAR", b, "위반주입-혼재금지")
+    # ── V-SEG-01 : 혼재금지 — 인화성 가스(2.1) ↔ 인화성 액체(3), 코드 2 ─────
+    #    SK5(유류) ↔ SK6(LPG·유류) 는 실제 인접 선석이고 화물-부두 조합도 자연스럽다.
+    a, b = ADJACENT_PAIRS[3]                       # SK5부두 / SK6부두
+    r1 = add(_v("1203"), "VIO001", "GASOLINE STAR", a, "위반주입-혼재금지")
+    r2 = add(VIOLATION_CARGO["프로페인"], "VIO002", "PROPANE CARRIER", b, "위반주입-혼재금지")
     scenarios.append({
         "violation_id": "V-SEG-01", "violation_type": "혼재금지(IMDG 격리)",
         "target_bl_no": f"{r1['bl_no']},{r2['bl_no']}",
         "target_callsgn": f"{r1['callsgn']},{r2['callsgn']}",
         "target_facility": f"{a},{b}",
-        "detail": f"인접 선석 {a}(황산 UN1830/Class 8) ↔ {b}(벤젠 UN1114/Class 3) 동시 취급",
-        "rule_basis": SEGREGATION_RULES[0][2],
-        "expected_judgement": "혼재금지 경고 — 인접 선석 동시 취급 불가",
+        "detail": f"인접 선석 {a}(가솔린 UN1203/Class 3) ↔ {b}(프로페인 UN1978/Class 2.1) 동시 취급",
+        "rule_basis": f"IMDG 7.2 일반격리표 Class 2.1↔3 = 코드 2 — {SEGREGATION_RULES[0][3]} / ※ 선내 적재 규정을 인접 선석 스크리닝에 차용(법정 위반판정 아님)",
+        "rule_authority": AUTHORITY_BORROWED,
+        "expected_judgement": "확인필요 경고 — 한 선박에 함께 실렸다면 Separated from(다른 격창) 대상. 인접 선석 동시하역 가부는 터미널 운영규정으로 확인",
     })
 
-    # ── V-SEG-02 : 혼재금지 (독성 가스 ↔ 인화성 가스, 인접 선석) ────────────
+    # ── V-SEG-02 : 혼재금지 — 인화성 가스(2.1) ↔ 부식성(8), 코드 1 ──────────
     a2, b2 = ADJACENT_PAIRS[4]                     # SK6부두 / SK7부두
-    r3 = add(VIOLATION_CARGO["암모니아"], "VIO003", "AMMONIA CARRIER", a2, "위반주입-혼재금지")
-    r4 = add(("프로필렌", "1077", "2.1", "-"), "VIO004", "PROPYLENE GAS", b2, "위반주입-혼재금지")
+    r3 = add(VIOLATION_CARGO["프로페인"], "VIO003", "LPG PIONEER", a2, "위반주입-혼재금지")
+    r4 = add(VIOLATION_CARGO["황산"], "VIO004", "SULFURIC TRADER", b2, "위반주입-혼재금지")
     scenarios.append({
         "violation_id": "V-SEG-02", "violation_type": "혼재금지(IMDG 격리)",
         "target_bl_no": f"{r3['bl_no']},{r4['bl_no']}",
         "target_callsgn": f"{r3['callsgn']},{r4['callsgn']}",
         "target_facility": f"{a2},{b2}",
-        "detail": f"인접 선석 {a2}(암모니아 UN1005/Class 2.3) ↔ {b2}(프로필렌 UN1077/Class 2.1) 동시 취급",
-        "rule_basis": SEGREGATION_RULES[2][2],
-        "expected_judgement": "혼재금지 경고 — 독성가스·인화성가스 인접 취급 불가",
+        "detail": f"인접 선석 {a2}(프로페인 UN1978/Class 2.1) ↔ {b2}(황산 UN1830/Class 8) 동시 취급",
+        "rule_basis": f"IMDG 7.2 일반격리표 Class 2.1↔8 = 코드 1 — {SEGREGATION_RULES[2][3]} / ※ 선내 적재 규정을 인접 선석 스크리닝에 차용(법정 위반판정 아님)",
+        "rule_authority": AUTHORITY_BORROWED,
+        "expected_judgement": "확인필요 경고 — 한 선박에 함께 실렸다면 Away from(수평 3m 이상) 대상",
+    })
+
+    # ── V-SEG-03 : 혼재금지 — 독성 가스(2.3) ↔ 인화성 액체(3), 코드 2 ───────
+    a3, b3 = ADJACENT_PAIRS[5]                     # SK7부두 / SK8부두
+    r9 = add(VIOLATION_CARGO["암모니아"], "VIO009", "AMMONIA CARRIER", a3, "위반주입-혼재금지")
+    r10 = add(_v("1993"), "VIO010", "CRUDE RUNNER", b3,
+              "위반주입-혼재금지")
+    scenarios.append({
+        "violation_id": "V-SEG-03", "violation_type": "혼재금지(IMDG 격리)",
+        "target_bl_no": f"{r9['bl_no']},{r10['bl_no']}",
+        "target_callsgn": f"{r9['callsgn']},{r10['callsgn']}",
+        "target_facility": f"{a3},{b3}",
+        "detail": f"인접 선석 {a3}(암모니아 UN1005/Class 2.3) ↔ {b3}(석유 UN1993/Class 3) 동시 취급",
+        "rule_basis": f"IMDG 7.2 일반격리표 Class 2.3↔3 = 코드 2 — {SEGREGATION_RULES[1][3]} / ※ 선내 적재 규정을 인접 선석 스크리닝에 차용(법정 위반판정 아님)",
+        "rule_authority": AUTHORITY_BORROWED,
+        "expected_judgement": "확인필요 경고 — 한 선박에 함께 실렸다면 Separated from(다른 격창) 대상",
     })
 
     # ── V-DG-01 : 위험물 UN 번호 누락 (MSDS 매칭 실패 유도) ─────────────────
-    r5 = add(("벤젠", None, None, None), "VIO005", "UNKNOWN CHEM", "UTK부두",
+    r5 = add((imdg_dgl.DGL["1114"].psn_ko, None, None, None), "VIO005", "UNKNOWN CHEM", "UTK부두",
              "위반주입-UN번호누락")
     r5["cargo_se_name"] = "액체"          # 액체화물인데 UN 번호만 비어 있는 상태
     r5["package_type_name"] = "벌크"
@@ -372,12 +484,13 @@ def inject_violations(rows):
         "target_bl_no": r5["bl_no"], "target_callsgn": r5["callsgn"],
         "target_facility": "UTK부두",
         "detail": "화물명은 벤젠(인화성 액체)인데 dg_un_no 미기재 → MSDS 매칭 불가",
-        "rule_basis": "위험물은 UN 번호 신고 의무 — 미기재 시 안전판정 근거 확보 불가",
+        "rule_basis": "IMO Res. MSC.150(77) — MARPOL Annex I 화물·선박연료유 MSDS 제공 권고 / 「위험물 선박운송 및 저장규칙」 제18조(선장의 의무) 위험물 명세서 기재사항 확인. 미기재 시 MSDS 매칭 불가 → 안전판정 근거 확보 불가",
+        "rule_authority": AUTHORITY_STATUTE,
         "expected_judgement": "판정불가 경고 — UN 번호 보완 요청",
     })
 
     # ── V-PKG-01 : 포장·하역방식 부적합 ────────────────────────────────────
-    r6 = add(("아크릴로니트릴", "1093", "3", "Ⅰ"), "VIO006", "ACRYLO TRADER",
+    r6 = add(_v("1093"), "VIO006", "ACRYLO TRADER",
              "정일1부두", "위반주입-포장부적합")
     r6["package_type_name"] = "드럼(일반)"     # 용기등급 Ⅰ 인데 일반 포장
     r6["unload_method_name"] = "크레인"        # 액체인데 크레인 하역
@@ -386,33 +499,60 @@ def inject_violations(rows):
         "target_bl_no": r6["bl_no"], "target_callsgn": r6["callsgn"],
         "target_facility": "정일1부두",
         "detail": "아크릴로니트릴(UN1093/Class 3/용기등급 Ⅰ)을 일반 드럼·크레인 하역으로 신고",
-        "rule_basis": "용기등급 Ⅰ(고위험)은 전용 용기·펌프 이송 필요",
+        "rule_basis": "「위험물 선박운송 및 저장규칙」 제20조·「위험물 선박운송 기준」 — 용기등급 Ⅰ(고위험)은 전용 용기·펌프 이송 필요",
+        "rule_authority": AUTHORITY_STATUTE,
         "expected_judgement": "포장기준 위반 경고",
     })
 
-    # ── V-DRF-01 : 흘수 초과 (부두 수심 대비) ──────────────────────────────
-    #   화물 manifest 컬럼이 아니므로 시나리오 정의로 남긴다.
-    r7 = add(("석유(PETROLEUM)", "1993", "3", "해당없음"), "VIO007", "DEEP DRAFT VLCC",
+    # ── V-DRF-01 : 흘수 초과 (조위 반영 가용수심·UKC 기준) ──────────────────
+    #
+    #   [실무 반영 정정 2026-08-02]
+    #   기존 판정식은 "선박 흘수 < 부두 수심" 이었다. 이건 실무와 다르다.
+    #     (1) BERTH_DEPTH_M 은 **해도기준면(Chart Datum) 기준 수심**이다.
+    #         실제 그 시각의 가용수심 = 해도수심 + 조위(tide_level).
+    #         울산항 대조차는 약 0.3~0.5 m 수준이지만, 대형 유조선은 이 여유로
+    #         접안 시각을 조정한다. 조위를 빼면 만조에만 들어올 수 있는 배를
+    #         "영구 접안불가"로 잘못 판정한다.
+    #     (2) 실무는 흘수와 수심이 같아도 되는 게 아니라 **UKC(Under Keel
+    #         Clearance, 용골하 여유수심)** 를 요구한다. 통상 흘수의 10% 또는
+    #         최소 여유(항만·선종별로 다름) 중 큰 값을 쓴다.
+    #   → 아래 시나리오는 이 두 요소를 명시한 판정식으로 다시 쓴다.
+    #     실제 계산은 mart.berth_draught_check 뷰가 수행한다(mart_views.sql).
+    draft = 11.0
+    depth = BERTH_DEPTH_M["SK1부두"]
+    tide_m = 0.4                       # 시나리오 시각의 조위(합성값)
+    ukc_req = round(draft * UKC_RATIO, 2)
+    available = round(depth + tide_m, 2)
+    r7 = add(_v("1993"), "VIO007", "DEEP DRAFT VLCC",
              "SK1부두", "위반주입-흘수초과")
     scenarios.append({
-        "violation_id": "V-DRF-01", "violation_type": "흘수 초과",
+        "violation_id": "V-DRF-01", "violation_type": "흘수 초과(UKC 부족)",
         "target_bl_no": r7["bl_no"], "target_callsgn": r7["callsgn"],
         "target_facility": "SK1부두",
-        "detail": f"SK1부두 수심 {BERTH_DEPTH_M['SK1부두']}m 대비 선박 흘수 11.0m 배정",
-        "rule_basis": "선박 흘수 < 부두 수심(안전여유 포함) 이어야 접안 가능 — 좌초 위험",
-        "expected_judgement": "접안 불가 경고 — 대체 선석(SK8, 수심 18m) 제안",
+        "detail": (f"SK1부두 해도수심 {depth}m + 조위 {tide_m}m = 가용수심 {available}m, "
+                   f"선박 흘수 {draft}m → UKC {round(available - draft, 2)}m "
+                   f"(요구 {ukc_req}m 미달, 실제로는 착저)"),
+        "rule_basis": (f"가용수심 = 해도수심 + 조위. UKC = 가용수심 − 흘수 ≥ "
+                       f"흘수×{UKC_RATIO:.0%}(관행값, 터미널 규정으로 확정 필요)"),
+        "rule_authority": AUTHORITY_OPERATIONAL,
+        "expected_judgement": "접안 불가 경고 — 대체 선석(SK8, 해도수심 18m) 제안",
     })
 
     # ── V-WX-01 : 기상 임계 초과 (violation_weather_obs 와 연동) ────────────
-    r8 = add(("벤젠", "1114", "3", "Ⅱ"), "VIO008", "WEATHER RISK",
+    #   [실무 반영] 풍속만 보지 않는다. 액체부두는 **풍향**이 이안풍(offshore)
+    #   이면 계류삭 장력이 급증하고, 시정(해무)이 나쁘면 도선 자체가 중단된다.
+    #   울산항은 해무 발생이 잦아 시정이 실질적 병목이다.
+    r8 = add(_v("1114"), "VIO008", "WEATHER RISK",
              "정일1부두", "위반주입-기상초과")
     scenarios.append({
         "violation_id": "V-WX-01", "violation_type": "기상 임계 초과",
         "target_bl_no": r8["bl_no"], "target_callsgn": r8["callsgn"],
         "target_facility": "정일1부두",
-        "detail": "정일1/2부두 하역중단 기준(풍속 17.0m/s·파고 1.0m) 대비 풍속 19.5m/s·파고 1.8m",
+        "detail": ("정일1/2부두 하역중단 기준(풍속 17.0m/s·파고 1.0m) 대비 "
+                   "풍속 19.5m/s·파고 1.8m, 풍향 225°(이안풍), 시정 1,200m(해무)"),
         "rule_basis": "data/seed/berth_weather_thresholds_seed.csv — 정일1/2부두(산암리)",
-        "expected_judgement": "하역중단 경고 — 이안 기준(19m/s)도 초과",
+        "rule_authority": AUTHORITY_OPERATIONAL,
+        "expected_judgement": "하역중단 경고 — 이안 기준(19m/s)도 초과, 시정 부족으로 도선 제한",
     })
 
     return rows, scenarios
@@ -436,6 +576,36 @@ def build_weather_violation_rows():
 
 
 # ===========================================================================
+def enforce_dgl(rows) -> None:
+    """
+    생성된 전 행의 (화물명, UN, Class, 용기등급) 조합을 DGL 참조표로 검증한다.
+    하나라도 어긋나면 예외를 던져 **CSV 자체가 나오지 않게** 한다.
+
+    조용히 틀린 합성 데이터가 유통되는 것이 이 프로젝트에서 가장 위험하다.
+    스키마 39컬럼이 맞아도 내용이 틀리면 아무 의미가 없기 때문이다.
+    """
+    problems = []
+    for r in rows:
+        un = r.get("dg_un_no")
+        if not un:
+            continue                      # 비위험물 또는 UN 누락 시나리오(V-DG-01)
+        # manifest 에 Class·PG 컬럼이 없으므로 DGL 값으로 역검증한다:
+        # UN 이 참조표에 있고, 화물명이 그 UN 의 국문 통용명과 일치하는가.
+        e = imdg_dgl.lookup(un)
+        if e is None:
+            problems.append(f"{r['bl_no']}: UN{un} 이 DGL 참조표에 없음")
+            continue
+        if r.get("cargo_name_raw") and r["cargo_name_raw"] != e.psn_ko:
+            problems.append(
+                f"{r['bl_no']}: UN{e.un_no} 의 통용명은 '{e.psn_ko}' 인데 "
+                f"'{r['cargo_name_raw']}' 로 기재됨")
+    if problems:
+        raise SystemExit(
+            "[DGL 검증 실패] 합성 데이터를 생성하지 않는다.\n  - "
+            + "\n  - ".join(problems[:20])
+            + (f"\n  ... 외 {len(problems) - 20}건" if len(problems) > 20 else ""))
+
+
 def write_csv(rows, path, columns):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     df = pd.DataFrame(rows)
@@ -443,6 +613,11 @@ def write_csv(rows, path, columns):
         if c not in df.columns:
             df[c] = None
     df = df[columns]
+    # UN 번호는 반드시 문자열로 쓴다. 숫자로 두면 NULL 이 하나만 섞여도 pandas 가
+    # float 으로 올려 '1294.0' 이 되고, 4자리 UN 조인이 통째로 깨진다.
+    if "dg_un_no" in df.columns:
+        df["dg_un_no"] = df["dg_un_no"].apply(
+            lambda v: "" if pd.isna(v) else str(v).split(".")[0])
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return df
 
@@ -450,20 +625,26 @@ def write_csv(rows, path, columns):
 def main():
     ap = argparse.ArgumentParser(description="합성 화물 manifest 생성 (WBS 1.5/2.4)")
     ap.add_argument("--no-violations", action="store_true",
-                    help="파이프라인에는 v2(정상)만 반영 (v3 파일은 그대로 생성)")
+                    help="파이프라인에는 정상 케이스만 반영")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="PORT-MIS staging 이 낡아도 생성 강행(권장하지 않음)")
     args = ap.parse_args()
 
-    pool = build_vessel_pool()
+    pool = build_vessel_pool(args.allow_stale)
     n_real = sum(1 for _, _, _, _, est in pool if not est)
     src = "실제 staging callsgn" if pool else "폴백 가짜 callsgn"
 
-    v2_rows = build_v2(pool)
-    df_v2 = write_csv([dict(r) for r in v2_rows], OUT_V2, SCHEMA_COLUMNS)
+    normal_rows = build_v2(pool)
+    v3_rows, scenarios = inject_violations([dict(r) for r in normal_rows])
 
-    v3_rows, scenarios = inject_violations([dict(r) for r in v2_rows])
+    # ★ CSV 를 쓰기 전에 DGL 검증. 실패하면 여기서 멈춘다.
+    enforce_dgl(v3_rows)
+
     df_v3 = write_csv(v3_rows, OUT_V3, SCHEMA_COLUMNS)
+    _is_violation = df_v3["cargo_basis"].astype(str).str.startswith("위반주입-")
+    df_normal = df_v3[~_is_violation]
 
-    target = df_v2 if args.no_violations else df_v3
+    target = df_normal if args.no_violations else df_v3
     os.makedirs(STAGING, exist_ok=True)
     target.to_csv(OUT_PIPELINE, index=False, encoding="utf-8-sig")
 
@@ -471,26 +652,33 @@ def main():
     with open(OUT_SCENARIO, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=[
             "violation_id", "violation_type", "target_bl_no", "target_callsgn",
-            "target_facility", "detail", "rule_basis", "expected_judgement"])
+            "target_facility", "detail", "rule_basis", "rule_authority",
+            "expected_judgement"])
         w.writeheader()
         w.writerows(scenarios)
 
     pd.DataFrame(build_weather_violation_rows()).to_csv(
         OUT_WEATHER, index=False, encoding="utf-8-sig")
 
-    liq = df_v3[df_v3["dg_un_no"].notna()]
+    liq = df_v3[df_v3["dg_un_no"].astype(str).str.strip() != ""]
     real_basis = df_v3[df_v3["cargo_basis"] == "PORT-MIS 실선종 기반"]
     print("=" * 70)
     print("합성 화물 manifest 생성 완료 (WBS 1.5 / 2.4)")
     print("=" * 70)
-    print(f"  [v2 정상]     {OUT_V2}  ({len(df_v2)}행)")
-    print(f"  [v3 위반포함] {OUT_V3}  ({len(df_v3)}행)")
+    print(f"  [정상+위반]   {OUT_V3}  ({len(df_v3)}행 "
+          f"= 정상 {len(df_normal)} + 위반 {len(df_v3) - len(df_normal)})")
     print(f"  [시나리오]    {OUT_SCENARIO}  ({len(scenarios)}건)")
     print(f"  [기상 초과]   {OUT_WEATHER}")
     print(f"  [파이프라인]  {OUT_PIPELINE}  "
-          f"({'v2 정상' if args.no_violations else 'v3 위반포함'})")
+          f"({'정상만' if args.no_violations else '정상+위반'})")
+    print("  ※ 정상 케이스만 필요하면 cargo_basis 가 '위반주입-' 으로 시작하지 않는 행만 필터")
     print()
     print(f"  스키마 컬럼   : {len(SCHEMA_COLUMNS)}개 (mart_views.sql 정의와 1:1)")
+    print(f"  DGL 검증      : 통과 (UN↔화물명 정합 {len(liq)}행)")
+    _todo = imdg_dgl.unverified_entries()
+    if _todo:
+        print(f"  ※ DGL 참조표 {len(_todo)}종은 아직 IMDG Code 원문 미대조 — "
+              f"py -m data_pipeline.checks.check_dgl_consistency 로 MSDS 대조 가능")
     print(f"  키 출처       : {src} — 실선종 확인 {n_real}척 / 전체 {len(pool)}척")
     print(f"  위험물 화물   : {len(liq)}행 (UN번호 有)")
     print(f"  화물 배정근거 : 실선종 {len(real_basis)}행 / 추정 {len(df_v3) - len(real_basis)}행")
