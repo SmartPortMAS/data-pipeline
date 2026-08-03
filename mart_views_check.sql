@@ -36,12 +36,19 @@ FROM mart.vessel_latest_position;
 
 -- [검증 4] cargo_msds — UN 번호 보유 화물의 MSDS 매칭 (0건이면 조인키 점검)
 SELECT '4. 위험물 MSDS 매칭' AS check_name,
-       CASE WHEN dg_total = 0 THEN 'PASS (위험물 화물 없음)'
+       -- ★ "MSDS 테이블이 비어 있음"과 "조인키가 깨짐"은 원인도 대응도 다르다.
+       --   전자는 수집 미완료(MSDS API 키·수집 배치), 후자는 dg_un_no 정규화 문제다.
+       --   구분하지 않으면 수집만 안 됐는데 조인 코드를 뒤지게 된다.
+       CASE WHEN dg_total  = 0 THEN 'PASS (위험물 화물 없음)'
+            WHEN msds_rows = 0 THEN 'SKIP (MSDS 미적재 — 화물 UN번호 '
+                                    || dg_total || '건 대기중. 조인키 문제 아님)'
             WHEN matched > 0 THEN 'PASS (' || matched || '/' || dg_total || ' 매칭)'
-            ELSE 'FAIL (UN번호 ' || dg_total || '건 모두 미매칭 — dg_un_no 조인키 점검)' END AS result
+            ELSE 'FAIL (MSDS ' || msds_rows || '행 적재됐는데 UN번호 ' || dg_total
+                 || '건 모두 미매칭 — dg_un_no 조인키 점검)' END AS result
 FROM (
     SELECT count(*) FILTER (WHERE dg_un_no IS NOT NULL)                   AS dg_total,
-           count(*) FILTER (WHERE dg_un_no IS NOT NULL AND msds_matched)  AS matched
+           count(*) FILTER (WHERE dg_un_no IS NOT NULL AND msds_matched)  AS matched,
+           (SELECT count(*) FROM msds_chemical)                           AS msds_rows
     FROM mart.cargo_msds
 ) t;
 
@@ -148,3 +155,86 @@ FROM (
                             ('OK', 'MARGINAL', 'NOT_ALLOWED', 'UNKNOWN')) AS bad_verdict
     FROM mart.berth_draught_check
 ) t;
+
+-- [검증 10] 적재 계층 MMSI-First — vessel_uid 결측·중복 없음
+--   PostgreSQL 유니크 인덱스는 NULL 을 서로 다른 값으로 취급한다.
+--   적재 자연키에 NULL 가능 컬럼(callsgn)을 쓰면 ON CONFLICT 가 걸리지 않아
+--   폴링마다 중복 행이 쌓인다. vessel_uid 는 항상 채워져야 한다.
+SELECT '10. 적재키 vessel_uid 무결성' AS check_name,
+       CASE WHEN total = 0            THEN 'PASS (적재 데이터 없음)'
+            WHEN uid_null > 0         THEN 'FAIL (vessel_uid 결측 ' || uid_null || '행)'
+            WHEN dup_rows > 0         THEN 'FAIL (동일 키 중복 ' || dup_rows || '행 — 유니크 인덱스 확인)'
+            ELSE 'PASS (' || total || '행, 고유선박 ' || uids || '척, 중복 0)'
+       END AS result
+FROM (
+    SELECT count(*)                                          AS total,
+           count(*) FILTER (WHERE vessel_uid IS NULL)        AS uid_null,
+           count(DISTINCT vessel_uid)                        AS uids,
+           (SELECT COALESCE(sum(c - 1), 0) FROM (
+                SELECT count(*) AS c FROM upa_vessel_position
+                GROUP BY vessel_uid, received_at_utc HAVING count(*) > 1) d) AS dup_rows
+    FROM upa_vessel_position
+) t;
+
+-- [검증 11] 출항은 서류로 확정, 신호 소실과 분리되었는가
+--   신호 침묵을 DEPARTED 로 부르면 트랜스폰더가 죽은 채 접안 중인 배가
+--   지도에서 사라진다. DEPARTED 는 upa_port_call.departure_at_utc 근거로만
+--   나와야 하고, 근거 없는 침묵은 NO_SIGNAL 이어야 한다.
+SELECT '11. 출항 판정 근거' AS check_name,
+       CASE WHEN total = 0             THEN 'PASS (위치 데이터 없음)'
+            WHEN bad_state > 0         THEN 'FAIL (허용외 상태값 ' || bad_state || '건)'
+            WHEN dep_no_doc > 0        THEN 'FAIL (서류 근거 없는 DEPARTED ' || dep_no_doc || '건)'
+            ELSE 'PASS (총 ' || total || '척 / PRESENT ' || n_present
+                 || ' · STALE ' || n_stale || ' · NO_SIGNAL ' || n_nosig
+                 || ' · DEPARTED ' || n_dep || ')'
+       END AS result
+FROM (
+    SELECT count(*)                                                        AS total,
+           count(*) FILTER (WHERE presence_state NOT IN
+                ('PRESENT','STALE','NO_SIGNAL','DEPARTED'))                AS bad_state,
+           count(*) FILTER (WHERE presence_state = 'DEPARTED'
+                              AND departed_at_utc IS NULL)                 AS dep_no_doc,
+           count(*) FILTER (WHERE presence_state = 'PRESENT')              AS n_present,
+           count(*) FILTER (WHERE presence_state = 'STALE')                AS n_stale,
+           count(*) FILTER (WHERE presence_state = 'NO_SIGNAL')            AS n_nosig,
+           count(*) FILTER (WHERE presence_state = 'DEPARTED')             AS n_dep
+    FROM mart.vessel_latest_position
+) t;
+
+-- [검증 12] 수집기 생존 신호가 계산되는가
+--   전면 침묵(수집기 장애)과 "항만이 비었다"를 구별하기 위한 뷰.
+SELECT '12. 수집기 생존 신호' AS check_name,
+       CASE WHEN pipeline_state IS NULL THEN 'FAIL (pipeline_health 계산 불가)'
+            WHEN pipeline_state = 'NO_DATA' THEN 'PASS (적재 데이터 없음 — NO_DATA)'
+            ELSE 'PASS (' || pipeline_state || ', 수집경과 ' || collect_age_min
+                 || '분 / 원천경과 ' || source_age_min || '분)'
+       END AS result
+FROM mart.pipeline_health;
+
+-- ---------------------------------------------------------------------------
+-- [참고 A] presence_state 임계값 실측 근거 산출 쿼리
+--
+--   ★ 30분/6시간은 아직 실측 근거가 없는 잠정값이다.
+--     "6분 폴링이니까 30분"은 논리가 아니다. 아래로 실제 관측 간격 분포를
+--     구하고, p99 를 넘는 지점을 PRESENT 경계로 잡아야 근거 있는 값이 된다.
+--     실데이터가 충분히 쌓인 뒤 재실행해 임계값을 갱신할 것.
+--
+--   해석: p99 가 11분이면 → "실측 p99 11분, 여유 2.7배로 30분" 이 된다.
+--         max_gap 이 6시간을 넘으면 NO_SIGNAL 경계도 함께 올려야 한다.
+-- ---------------------------------------------------------------------------
+WITH gaps AS (
+    SELECT vessel_uid,
+           EXTRACT(EPOCH FROM (received_at_utc
+             - lag(received_at_utc) OVER (PARTITION BY vessel_uid
+                                          ORDER BY received_at_utc))) / 60 AS gap_min
+    FROM upa_vessel_position
+)
+SELECT 'A. 관측간격 분포(임계값 근거)'                                        AS check_name,
+       count(*)                                                              AS n_gaps,
+       count(DISTINCT vessel_uid)                                            AS n_vessels,
+       round(percentile_cont(0.50) WITHIN GROUP (ORDER BY gap_min)::numeric, 1) AS p50_min,
+       round(percentile_cont(0.95) WITHIN GROUP (ORDER BY gap_min)::numeric, 1) AS p95_min,
+       round(percentile_cont(0.99) WITHIN GROUP (ORDER BY gap_min)::numeric, 1) AS p99_min,
+       round(max(gap_min)::numeric, 1)                                       AS max_gap_min
+FROM gaps
+WHERE gap_min IS NOT NULL AND gap_min > 0;
