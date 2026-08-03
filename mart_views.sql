@@ -18,21 +18,53 @@
 --   물리 마트 테이블 = 스냅샷 이력 축적 — 시계열 분석·모델 학습용
 --   (동일 조인 로직의 이중화가 아니라 서빙/학습 용도 분리다)
 --
--- 연계 키 (회의 합의):
---   callsgn          — 선박: 위치 ↔ PORT-MIS ↔ UPA (upper/trim 정규화 후 조인)
---   dg_un_no         — 화물 ↔ MSDS 위험물
---   bl_no            — 하역 ↔ 화물
---   observed_at_utc  — 기상 최신값
---   식별 우선순위     — imo → mmsi → callsgn (vessel_key)
+-- ===========================================================================
+-- 키 체계 (2026-08 MMSI-First 전환 이후) — ★ 여기가 자주 혼동된다
+-- ===========================================================================
+-- 키는 "고유키"와 "조인키"가 서로 다른 역할을 한다. 하나로 착각하면 안 된다.
 --
--- 뷰 계층 (의존 순서대로 생성):
+--   [고유키 / 식별키]  vessel_uid  — "이 배가 그 배인가"
+--       COALESCE(mmsi::text, 'CS:'||upper(btrim(callsgn)))
+--       결측 0%인 MMSI 가 1순위. 우리 시스템이 선박을 세는 단위.
+--       AIS 동적신호(Msg 1/2/3/18)에 실려오므로 위치가 있으면 항상 있다.
+--       → mart.vessel_identity, mart.vessel_latest_position 의 파티션 키
+--
+--   [조인키 / 연계키]  callsgn     — "이 배의 서류가 어느 것인가"
+--       PORT-MIS 입출항신고 · UPA 화물 manifest · 하역기록은 모두 호출부호로
+--       발급된다. MMSI 로는 이 서류들을 찾을 수 없다 (원천에 MMSI 컬럼 자체가
+--       없다). 따라서 서류 계열 조인은 앞으로도 callsgn 이다.
+--       AIS 정적신호(Msg 5/24)에 실려오므로 미송출 선박은 결측(약 31%).
+--
+--   [표시키]           vessel_key  — 화면·로그용 대표 식별자
+--       imo → mmsi → callsgn 우선순위로 고른 사람이 읽기 좋은 값.
+--       조인에 쓰지 말 것 (우선순위가 바뀌면 값이 바뀐다).
+--
+--   그 외 도메인 조인키:
+--       dg_un_no         — 화물 ↔ MSDS 위험물
+--       bl_no            — 하역 ↔ 화물
+--       facility_name    — 입항 ↔ 선석 제원(수심)
+--       observed_at_utc  — 기상·조위 최신값
+--
+--   ★ 요약: 배를 "세는" 것은 vessel_uid, 배의 "서류를 찾는" 것은 callsgn.
+--     그래서 dashboard_current 는 식별 조인만 vessel_uid 로 걸고
+--     (관공선도 화면에 남기려고), 입항·화물 조인은 callsgn 을 유지한다.
+--
+-- 뷰 계층 (의존 순서대로 생성) — 각 단계의 조인키를 함께 표기:
 --   1. mart.vessel_identity        선박 식별 마스터 (1척 = 1행)
+--        위치 --vessel_uid--> 자기 자신 집계,  PORT-MIS --callsgn--> 선종
 --   2. mart.vessel_latest_position 선박별 최신 위치 1행 (UPA 우선, AIS 보강)
+--        UPA∪AIS --vessel_uid--> 최신 1행,  upa_port_call --callsgn--> 출항확정
 --   3. mart.port_call_overview     입항 통합 (입항건당 대표 1행)
+--        PORT-MIS ∙ UPA운항 ∙ 화물 전부 --callsgn-->
 --   4. mart.cargo_msds             화물 ↔ MSDS (★안전관제 핵심)
+--        화물 --dg_un_no--> MSDS
 --   5. mart.weather_now            환경 최신 1행 (기상+조위+파고+조류 스냅샷)
+--        --observed_at_utc--> 각 관측 최신값
 --   5-1. mart.berth_draught_check  조위 반영 가용수심 · UKC 판정
+--        입항 --facility_name--> 선석 수심,  입항 --callsgn--> 흘수
 --   6. mart.dashboard_current      '한 줄 조회' — 대시보드·에이전트 진입점
+--        위치 --vessel_uid--> 식별 / 위치 --callsgn--> 입항·화물 / 기상 CROSS
+--   7. mart.pipeline_health        수집기 생존 신호 (조인 없음, 단일 집계행)
 --   (+ mart.msds_flat             msds_chemical JSONB 평탄화 — cargo_msds 가 사용)
 -- ===========================================================================
 
@@ -58,6 +90,13 @@ CREATE SCHEMA IF NOT EXISTS mart;
 -- 합집합 + 공통 메타데이터를 따른다 (적재 시 스키마 불일치 방지).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
+    -- ★ record_uid 는 upa_loader.TABLE_MAP 이 이 테이블의 UPSERT 자연키로 쓴다.
+    --   (bl_no 등 자연키 후보가 결측 가능해 전체 행 해시를 키로 쓰는 예외 테이블)
+    --   여기 껍데기에 이 컬럼이 빠져 있으면, 뷰가 먼저 테이블을 만든 환경에서
+    --   로더가 "column record_uid does not exist" 로 죽는다 (실증 확인).
+    --   스키마 소유권이 Alembic / 파이프라인 auto_create / 이 파일 3곳으로
+    --   갈라져 있어 생기는 문제다. 일원화 전까지는 여기서 맞춰 둔다.
+    record_uid                   text,
     port_code                    text,
     ptent_yr                     text,
     voyage_no                    text,
@@ -304,23 +343,93 @@ WITH unified AS (
         ORDER BY mmsi
     ) vi ON vi.mmsi = a.mmsi
     WHERE a.mmsi IS NOT NULL
+),
+-- 서류상 재항 여부 — 출항은 "추정"하지 않고 upa_port_call 로 "확정"한다.
+-- departure_at_utc 가 NULL 인 최신 입항 건이 있으면 아직 항내에 있다는 신고 상태.
+still_in_port AS (
+    SELECT DISTINCT upper(btrim(callsgn)) AS callsgn
+    FROM upa_port_call
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+      AND departure_at_utc IS NULL
+),
+departed_doc AS (
+    SELECT upper(btrim(callsgn)) AS callsgn, max(departure_at_utc) AS departed_at_utc
+    FROM upa_port_call
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+      AND departure_at_utc IS NOT NULL
+    GROUP BY 1
+),
+latest AS (
+    SELECT DISTINCT ON (u.vessel_uid)
+           u.vessel_uid                          AS vessel_pos_key,
+           -- 관측에 callsgn 이 안 실렸으면 vessel_identity 의 Last Known 값으로 보강
+           COALESCE(u.callsgn, vi2.callsgn)      AS callsgn,
+           u.mmsi,
+           u.latitude,
+           u.longitude,
+           u.sog,
+           u.cog,
+           u.nav_status_code,
+           u.received_at_utc,
+           u.quality_flag,
+           u.position_source
+    FROM unified u
+    LEFT JOIN mart.vessel_identity vi2 ON vi2.vessel_uid = u.vessel_uid
+    ORDER BY u.vessel_uid, u.received_at_utc DESC
 )
-SELECT DISTINCT ON (u.vessel_uid)
-       u.vessel_uid                          AS vessel_pos_key,
-       -- 관측에 callsgn 이 안 실렸으면 vessel_identity 의 Last Known 값으로 보강
-       COALESCE(u.callsgn, vi2.callsgn)      AS callsgn,
-       u.mmsi,
-       u.latitude,
-       u.longitude,
-       u.sog,
-       u.cog,
-       u.nav_status_code,
-       u.received_at_utc,
-       u.quality_flag,
-       u.position_source
-FROM unified u
-LEFT JOIN mart.vessel_identity vi2 ON vi2.vessel_uid = u.vessel_uid
-ORDER BY u.vessel_uid, u.received_at_utc DESC;
+SELECT l.*,
+       -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
+       -- -----------------------------------------------------------------------
+       -- 원시 신선도. 임계값을 박아 넣지 않은 값이라 소비자가 각자 기준을
+       -- 적용할 수 있다 (지도는 30분, 안전 에이전트는 더 엄격하게).
+       -- -----------------------------------------------------------------------
+       round(EXTRACT(EPOCH FROM (now() - l.received_at_utc)) / 60.0)::int
+                                                 AS position_age_min,
+       -- -----------------------------------------------------------------------
+       -- presence_state — 화면 표시용 존재 상태
+       --
+       -- ★ "신호가 없다"와 "배가 떠났다"는 다른 사건이다.
+       --   6시간 침묵의 원인은 실제 출항 / 접안 중 AIS 차단 / 트랜스폰더 고장 /
+       --   구조물 전파음영 / 우리 수집기 장애 최소 5가지다. 이걸 전부
+       --   DEPARTED 로 부르고 화면에서 지우면, 트랜스폰더가 죽은 채 선석에
+       --   붙어 있는 배가 지도에서 사라진다. 안전관제에서 이건 결함이다.
+       --
+       --   그래서 출항은 신호 부재로 추론하지 않고 upa_port_call 의
+       --   departure_at_utc(서류상 확정 정보)로만 판정한다.
+       --
+       --     PRESENT    30분 이내 관측 — 정상 표시
+       --     STALE      30분~6시간 침묵 — 회색 반투명, "N분 전" 배지
+       --     NO_SIGNAL  6시간 초과 침묵 + 출항 기록 없음
+       --                → ★숨기지 말 것. 별도 목록으로 관제사에게 노출.
+       --                  (서류상 재항 + 신호 소실 = 전화를 걸어야 하는 상황)
+       --     DEPARTED   출항 신고 확정 — 지도에서 제외해도 안전
+       --
+       --   임계값 30분/6시간은 현재 실측 근거가 없는 잠정값이다.
+       --   mart_views_check.sql 의 관측간격 분위수 쿼리로 재산정할 것.
+       -- -----------------------------------------------------------------------
+       CASE
+           WHEN d.departed_at_utc IS NOT NULL
+                AND d.departed_at_utc >= l.received_at_utc      THEN 'DEPARTED'
+           WHEN l.received_at_utc > now() - interval '30 min'    THEN 'PRESENT'
+           WHEN l.received_at_utc > now() - interval '6 hour'    THEN 'STALE'
+           ELSE 'NO_SIGNAL'
+       END                                       AS presence_state,
+       -- 서류상 아직 항내인가 (출항신고 없는 입항 건 보유)
+       (s.callsgn IS NOT NULL)                   AS doc_still_in_port,
+       d.departed_at_utc,
+       -- -----------------------------------------------------------------------
+       -- signal_health — 안전 에이전트용. 지도 표시보다 엄격하다.
+       -- 하역 중인 배가 12분(6분 폴링 2회분) 침묵하면 이미 이상 상황이다.
+       -- 지도 기준(30분)으로는 그 29분 동안 정상 아이콘으로 보인다.
+       -- -----------------------------------------------------------------------
+       CASE
+           WHEN l.received_at_utc > now() - interval '12 min'    THEN 'OK'
+           WHEN l.received_at_utc > now() - interval '30 min'    THEN 'DEGRADED'
+           ELSE 'LOST'
+       END                                       AS signal_health
+FROM latest l
+LEFT JOIN still_in_port s ON s.callsgn = l.callsgn
+LEFT JOIN departed_doc  d ON d.callsgn = l.callsgn;
 
 -- ---------------------------------------------------------------------------
 -- 3. mart.port_call_overview — 입항 통합 (입항건당 대표 1행)
@@ -734,7 +843,19 @@ SELECT
     wn.gust_ms,
     -- 조류: 액체부두 접·이안 조종의 직접 제약.
     wn.current_speed_cms,
-    wn.current_dir_deg
+    wn.current_dir_deg,
+    -- -----------------------------------------------------------------------
+    -- 존재 상태 — 프론트 진입점이 여기이므로 반드시 노출해야 한다.
+    --   프론트 기본 필터: presence_state = 'PRESENT'
+    --   'STALE'     회색 반투명 + position_age_min 배지
+    --   'NO_SIGNAL' ★숨기지 말 것. doc_still_in_port=true 이면
+    --               "서류상 재항인데 신호 소실" — 관제사 확인 대상.
+    --   'DEPARTED'  출항신고 확정 — 지도에서 제외해도 안전
+    -- -----------------------------------------------------------------------
+    p.position_age_min,
+    p.presence_state,
+    p.doc_still_in_port,
+    p.signal_health
 FROM mart.vessel_latest_position p
 CROSS JOIN LATERAL (
     SELECT CASE
@@ -754,3 +875,33 @@ LEFT JOIN mart.vessel_identity     vi  ON vi.vessel_uid = p.vessel_pos_key
 LEFT JOIN mart.port_call_overview  pco ON pco.callsgn = p.callsgn
 LEFT JOIN msds_by_vessel           mv  ON mv.callsgn = p.callsgn
 LEFT JOIN mart.weather_now         wn  ON TRUE;
+
+-- ---------------------------------------------------------------------------
+-- 7. mart.pipeline_health — 수집기 생존 신호 (관측성)
+--
+-- ★ 왜 필요한가
+--   수집기가 7시간 죽으면 모든 선박이 NO_SIGNAL 로 떨어지고 지도가 텅 빈다.
+--   화면상으로는 "울산항에 배가 한 척도 없음"과 구별되지 않는다.
+--   프론트는 pipeline_state='DEGRADED' 일 때 지도를 비우는 대신
+--   "수집 지연 — 표시 정보가 최신이 아닙니다" 배너를 띄워야 한다.
+--
+--   collected_at_utc(우리 수집 시각)와 received_at_utc(UPA 갱신 시각)를
+--   분리해 둔 덕분에 추가 수집 없이 계산된다.
+--     - collect_age_min 이 크다        → 우리 파이프라인 장애
+--     - source_age_min 만 크다         → UPA 쪽 갱신 지연 (우리는 정상)
+--   이 둘을 구분해야 장애 대응 대상이 정해진다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.pipeline_health AS
+SELECT
+    max(collected_at_utc)                                                  AS last_collect_at_utc,
+    round(EXTRACT(EPOCH FROM (now() - max(collected_at_utc))) / 60.0)::int AS collect_age_min,
+    max(received_at_utc)                                                   AS last_source_at_utc,
+    round(EXTRACT(EPOCH FROM (now() - max(received_at_utc))) / 60.0)::int  AS source_age_min,
+    count(*) FILTER (WHERE collected_at_utc > now() - interval '10 min')   AS rows_last_10min,
+    count(DISTINCT vessel_uid)                                             AS vessel_uid_total,
+    CASE
+        WHEN max(collected_at_utc) IS NULL                        THEN 'NO_DATA'
+        WHEN max(collected_at_utc) < now() - interval '20 min'    THEN 'DEGRADED'
+        ELSE 'OK'
+    END                                                                    AS pipeline_state
+FROM upa_vessel_position;
