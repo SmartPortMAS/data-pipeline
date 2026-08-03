@@ -26,9 +26,11 @@ MSDS PostgreSQL 적재 모듈 — JSONB 기반 마스터 DB
 """
 
 import glob
+import html
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 import psycopg2
@@ -130,7 +132,7 @@ def _build_row(record: dict) -> dict:
     # quality_flag: chem_id와 name_ko 중 하나라도 없으면 MISSING_KEY
     quality_flag: str = "OK" if (chem_id and name_ko) else "MISSING_KEY"
 
-    return {
+    row = {
         "chem_id":          chem_id,
         "cas_no":           cas_no,
         "un_no":            un_no,
@@ -145,6 +147,77 @@ def _build_row(record: dict) -> dict:
         # SQL의 ::jsonb 캐스트로 PostgreSQL JSONB 타입에 바인딩
         "msds_payload":     json.dumps(payload, ensure_ascii=False),
     }
+    row.update(_extract_structured_values(record))
+    return row
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 정형 값 컬럼 추출 (backend Alembic 0007)
+# ─────────────────────────────────────────────────────────────────────────────
+# msds_payload 안에 묻혀 있던 "값 하나짜리" 항목을 일반 컬럼으로도 적재한다.
+# 챗봇이 인화점·용기등급 같은 확정된 값을 벡터 검색(근사)이 아니라 컬럼 조회
+# (결정적)로 답하기 위한 것 — 0007 마이그레이션 주석에 배경이 있다.
+#
+# 코드 매핑은 msds_preprocessor._flatten_record()와 동일하게 유지해야 한다.
+# 그쪽은 분석용 staging CSV를, 이쪽은 서비스 테이블을 만든다.
+_STRUCTURED_ITEMS: dict[str, tuple[str, str]] = {
+    "flash_point_text":      ("detail09", "I14"),
+    "boiling_point_text":    ("detail09", "I12"),
+    "vapor_pressure_text":   ("detail09", "I22"),
+    "specific_gravity_text": ("detail09", "I28"),
+    "packing_group":         ("detail14", "N08"),
+    "ems_fire":              ("detail14", "N1202"),
+    "ems_spill":             ("detail14", "N1204"),
+    "signal_word":           ("detail02", "B0404"),
+    "exposure_limit_kr":     ("detail08", "H0202"),
+}
+
+# KOSHA가 값 없음을 나타내는 문자열. NULL로 정규화하지 않으면 "인화점: 자료없음"이
+# 값처럼 프롬프트에 실려 LLM이 근거로 인용한다.
+_NULL_VALUES: frozenset[str] = frozenset({"자료없음", "해당없음", "-", "", "N/A", "없음"})
+
+# 원문에 HTML 엔티티가 그대로 들어있다(예: 인화점 "&lt; 20 ℃").
+# 두 번 이상 이스케이프된 값도 실제로 있어서(detail08의 "&amp;lt;19.6%") 더 이상
+# 변하지 않을 때까지 반복해서 푼다. 상한은 병리적 입력 방어용이고 실측 최대는 2회다.
+# backend의 app/agents/chatbot/chunking.unescape()와 동작이 같아야 한다 — 같은 원문에서
+# 컬럼과 청크가 서로 다른 문자열을 만들면 근거 대조가 안 된다.
+_MAX_UNESCAPE_PASSES = 4
+
+
+def _unescape(text: str) -> str:
+    for _ in range(_MAX_UNESCAPE_PASSES):
+        decoded = html.unescape(text)
+        if decoded == text:
+            return decoded
+        text = decoded
+    return text
+
+
+def _item_detail(record: dict, section: str, code: str) -> str | None:
+    """지정 섹션에서 msdsItemCode가 일치하는 itemDetail을 꺼내 정규화한다."""
+    data = (record.get(section) or {}).get("data")
+    if not isinstance(data, list):
+        return None
+    for item in data:
+        if (item.get("msdsItemCode") or "").strip() != code:
+            continue
+        value = _unescape((item.get("itemDetail") or "").strip())
+        return None if value in _NULL_VALUES else value
+    return None
+
+
+def _extract_structured_values(record: dict) -> dict:
+    values = {name: _item_detail(record, sec, code)
+              for name, (sec, code) in _STRUCTURED_ITEMS.items()}
+
+    # 인화점 섭씨값 — "-11 ℃", "&lt; 20 ℃"(→ "< 20 ℃"), "-1~565 ℃"처럼 부등호·범위·
+    # 단위·출처가 섞여 있어 첫 숫자만 취한다. 뽑히지 않으면 NULL로 두고 원문
+    # (flash_point_text)을 쓰게 한다 — 억지 파싱값으로 잘못된 수치를 답변에 싣는
+    # 것보다 값이 없다고 하는 편이 안전하다.
+    text = values.get("flash_point_text")
+    match = re.search(r"-?\d+\.?\d*", text) if text else None
+    values["flash_point_celsius"] = float(match.group()) if match else None
+    return values
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,7 +227,11 @@ _UPSERT_SQL = """
 INSERT INTO msds_chemical (
     chem_id, cas_no, un_no, name_ko, name_en,
     source_system, source_table, collected_at_utc,
-    quality_flag, is_synthetic, msds_payload
+    quality_flag, is_synthetic, msds_payload,
+    -- 정형 값 컬럼 (Alembic 0007)
+    flash_point_text, flash_point_celsius, boiling_point_text,
+    vapor_pressure_text, specific_gravity_text,
+    packing_group, ems_fire, ems_spill, signal_word, exposure_limit_kr
 ) VALUES (
     %(chem_id)s,
     %(cas_no)s,
@@ -166,7 +243,17 @@ INSERT INTO msds_chemical (
     %(collected_at_utc)s,
     %(quality_flag)s,
     %(is_synthetic)s,
-    %(msds_payload)s::jsonb      -- 문자열 → JSONB 타입 명시 캐스트
+    %(msds_payload)s::jsonb,     -- 문자열 → JSONB 타입 명시 캐스트
+    %(flash_point_text)s,
+    %(flash_point_celsius)s,
+    %(boiling_point_text)s,
+    %(vapor_pressure_text)s,
+    %(specific_gravity_text)s,
+    %(packing_group)s,
+    %(ems_fire)s,
+    %(ems_spill)s,
+    %(signal_word)s,
+    %(exposure_limit_kr)s
 )
 ON CONFLICT (chem_id) DO UPDATE SET
     -- 식별자 컬럼 갱신 (CAS 번호 정정 대응)
@@ -180,7 +267,19 @@ ON CONFLICT (chem_id) DO UPDATE SET
     collected_at_utc = EXCLUDED.collected_at_utc,
     quality_flag     = EXCLUDED.quality_flag,
     -- JSONB 페이로드 전체 교체 (|| 연산자로 병합이 아닌 완전 교체)
-    msds_payload     = EXCLUDED.msds_payload
+    msds_payload     = EXCLUDED.msds_payload,
+    -- 정형 값도 payload와 같은 원본에서 나오므로 함께 교체한다.
+    -- 값이 사라진 항목(자료없음으로 바뀜)은 NULL로 덮어써야 옛 값이 남지 않는다.
+    flash_point_text      = EXCLUDED.flash_point_text,
+    flash_point_celsius   = EXCLUDED.flash_point_celsius,
+    boiling_point_text    = EXCLUDED.boiling_point_text,
+    vapor_pressure_text   = EXCLUDED.vapor_pressure_text,
+    specific_gravity_text = EXCLUDED.specific_gravity_text,
+    packing_group         = EXCLUDED.packing_group,
+    ems_fire              = EXCLUDED.ems_fire,
+    ems_spill             = EXCLUDED.ems_spill,
+    signal_word           = EXCLUDED.signal_word,
+    exposure_limit_kr     = EXCLUDED.exposure_limit_kr
 ;
 """
 
