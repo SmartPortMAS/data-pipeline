@@ -155,6 +155,21 @@ def upsert_dataframe(
     """임시 테이블 경유 UPSERT (ON CONFLICT unique_cols)."""
     if df.empty:
         return 0
+
+    # 배치 내 키 중복 제거 — 같은 INSERT 문 안에 동일 유니크 키가 두 번 들어가면
+    # PostgreSQL 이 CardinalityViolation("cannot affect row a second time")을 낸다.
+    #
+    # 이 방어는 원래 load_csv() 에만 있었다. 그런데 upsert_dataframe() 은
+    # 공개 함수라 CSV 를 거치지 않는 호출자(전처리 결과를 DataFrame 째로 넣는
+    # 코드, 테스트, 마트 적재기)가 직접 부른다. 그 경로는 무방비였다.
+    # 방어는 우회 가능한 상위가 아니라 실제로 SQL 을 만드는 이 계층에 있어야 한다.
+    # (load_csv 의 기존 dedup 은 그대로 두어도 무해하다 — 여기서 한 번 더 걸린다)
+    if unique_cols and all(c in df.columns for c in unique_cols):
+        before = len(df)
+        df = df.drop_duplicates(subset=unique_cols, keep="last").reset_index(drop=True)
+        if len(df) < before:
+            print(f"  - 배치 내 키 중복 {before - len(df)}행 제거 ({table}, 키: {unique_cols})")
+
     _ensure_table(engine, table, df, unique_cols, auto_create)
     _ensure_unique_index(engine, table, unique_cols)
 

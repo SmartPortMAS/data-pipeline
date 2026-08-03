@@ -79,7 +79,11 @@ VSL_PSTN_INFO = {
         "sog", "cog", "rot", "heading", "draught",
     ],
     "utc_cols": ["received_at_utc"],
-    "key_cols": ["callsgn", "received_at_utc"],
+    # MMSI-First: 적재 자연키를 callsgn → vessel_uid 로 교체 (2026-08).
+    # callsgn 은 결측 가능 → PostgreSQL 유니크 인덱스가 NULL 을 서로 다른 값으로
+    # 취급해 ON CONFLICT 가 걸리지 않고 폴링마다 중복 행이 쌓였다.
+    # vessel_uid 는 common.create_vessel_uid() 가 NULL 없이 항상 채운다.
+    "key_cols": ["vessel_uid", "received_at_utc"],
 }
 
 # ---------------------------------------------------------------------------
