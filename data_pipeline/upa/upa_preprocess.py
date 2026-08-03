@@ -155,6 +155,8 @@ def preprocess_vessel_position(df: pd.DataFrame, is_synthetic: bool = False) -> 
     """2. 항내 선박위치정보 -> 선박 위치."""
     spec = cfg.VSL_PSTN_INFO
     df = _apply_common(df, spec, is_synthetic)
+    # MMSI-First 선박 고유키 — UPSERT 자연키(key_cols)가 이 컬럼을 쓴다.
+    df = common.create_vessel_uid(df)
     df = common.create_port_call_id(df)
     df = common.flag_missing_key(df, spec["key_cols"])
     df = common.flag_ulsan_bbox(df)

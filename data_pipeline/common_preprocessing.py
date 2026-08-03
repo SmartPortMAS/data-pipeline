@@ -163,6 +163,82 @@ def flag_ulsan_bbox(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def create_vessel_uid(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    선박 고유키(vessel_uid) 생성 — MMSI-First.
+
+    [왜 필요한가]
+    마트 뷰(mart.vessel_identity)는 이미 MMSI-First 로 선박을 식별하는데,
+    적재 계층(UPSERT 자연키)은 여전히 callsgn 을 쓰고 있었다. 그 결과
+    같은 시스템 안에 선박 식별 기준이 2개 존재했고, 다음 버그를 낳았다:
+
+      PostgreSQL 유니크 인덱스는 NULL 을 "서로 다른 값"으로 취급한다.
+      → callsgn 이 NULL 인 행은 ON CONFLICT 에 절대 걸리지 않는다.
+      → 호출부호 미송출 선박은 6분 폴링마다 새 행이 통째로 INSERT 된다.
+      (실증: 폴링 3회 시 callsgn 보유 선박 1행 / callsgn NULL 선박 3행)
+
+    식별 키는 최하위 계층에서 한 번 정하고 위로 전파되어야 한다.
+    이 함수가 그 단일 기준점이다.
+
+    [우선순위]
+      1) MMSI      — UPA VslPstnInfo 의 mmsiNo. 결측률 0%가 관측된 주 식별자
+      2) 'CS:'+호출부호 — MMSI 조차 없을 때의 대체
+      3) 'ANON:'+해시  — 둘 다 없을 때. 위치·시각 기반 결정적(deterministic)
+                        해시라 같은 관측을 재수집해도 같은 값 → 멱등 유지
+
+    3)이 없으면 vessel_uid 가 NULL 이 되어 애초의 NULL 중복 버그가 그대로
+    재발한다. 'ANON:' 은 식별을 포기하되 멱등성은 지키기 위한 장치다.
+    """
+    import hashlib
+
+    df = df.copy()
+
+    for col in ["mmsi", "callsgn"]:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    # MMSI 는 numeric_cols 를 거치며 float 이 되어 '224998000.0' 처럼 찍힌다.
+    # 소수점을 떼어 정수 문자열로 정규화한다.
+    mmsi_str = (
+        pd.to_numeric(df["mmsi"], errors="coerce")
+        .astype("Float64")
+        .apply(lambda v: "" if pd.isna(v) else str(int(v)))
+    )
+    # ★ fillna("") 를 먼저 해야 한다. pandas 의 astype(str) 은 object dtype 의
+    #   NaN 을 문자열로 바꾸지 않고 그대로 두고, 이어지는 .str 접근자는 NaN 을
+    #   전파한다. 그러면 아래 replace 가 걸리지 않아 식별정보가 전혀 없는 행이
+    #   ANON 분기로 가지 못하고 vessel_uid 가 NaN 이 된다 (원래 고치려던 그 버그).
+    cs_str = df["callsgn"].fillna("").astype(str).str.strip().str.upper()
+    cs_str = cs_str.replace(list(NULL_VALUES) + ["NAN", "<NA>"], "", regex=False)
+
+    uid = pd.Series([""] * len(df), index=df.index, dtype=object)
+    src = pd.Series([""] * len(df), index=df.index, dtype=object)
+
+    has_mmsi = mmsi_str != ""
+    uid[has_mmsi] = mmsi_str[has_mmsi]
+    src[has_mmsi] = "MMSI"
+
+    has_cs = ~has_mmsi & (cs_str != "")
+    uid[has_cs] = "CS:" + cs_str[has_cs]
+    src[has_cs] = "CALLSIGN"
+
+    anon = ~has_mmsi & ~has_cs
+    if anon.any():
+        def _anon_key(idx):
+            parts = []
+            for c in ("latitude", "longitude", "received_at_utc"):
+                parts.append(str(df.at[idx, c]) if c in df.columns else "")
+            return "ANON:" + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+        uid[anon] = [_anon_key(i) for i in df.index[anon]]
+        src[anon] = "ANON"
+        df.loc[anon, "quality_flag"] = "MISSING_VESSEL_IDENTITY"
+
+    df["vessel_uid"] = uid
+    df["vessel_uid_source"] = src
+    return df
+
+
 def create_port_call_id(df: pd.DataFrame) -> pd.DataFrame:
     """
     입항 건 ID 생성 함수

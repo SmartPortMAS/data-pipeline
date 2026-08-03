@@ -34,7 +34,10 @@ from data_pipeline.common_pg_loader import load_all as _load_all
 # 예외 — upa_cargo_manifest 는 record_uid 유지: 자연키 후보(bl_no 등)가
 # 결측 가능해 유니크 인덱스로 쓸 수 없다. bzentyCd 확보 후 키 확정 예정.
 TABLE_MAP = {
-    "upa_vessel_position_stg.csv": ("upa_vessel_position", ["callsgn", "received_at_utc"]),
+    # 2026-08 MMSI-First: callsgn → vessel_uid.
+    # callsgn 은 결측 가능해 유니크 인덱스에서 NULL 이 서로 다른 값으로 취급되고,
+    # ON CONFLICT 가 걸리지 않아 폴링마다 중복 행이 쌓였다 (실증 확인).
+    "upa_vessel_position_stg.csv": ("upa_vessel_position", ["vessel_uid", "received_at_utc"]),
     # 입항 건(port_call_id) 하나에 입항·접안·이안·출항 이벤트가 comm_count 로 나뉘어
     # 여러 행 온다. 키를 port_call_id 만으로 두면 이벤트가 1행으로 합쳐져
     # "언제 접안했고 언제 이안했는지"가 사라진다 → 이벤트 단위 복합키로 보존한다.
