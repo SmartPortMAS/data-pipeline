@@ -112,6 +112,14 @@ PILOT_ADJACENT_PAIRS: list[tuple[str, str]] = [
 # 매핑이 필요하다. wharf_name은 upa_berth_facility_stg.csv 실제 값과 정확히
 # 일치해야 한다(2026-07-19 수집분 기준 확인됨). 이 매핑에 없는 선석은
 # berth_group=None으로 남고, 기상분석 에이전트는 전역 폴백 임계값을 쓴다.
+#
+# ★ 이 매핑을 "온산 스코프"로 쓰면 안 된다. 여기 실린 12개는 berth_weather_threshold에
+#   행이 있는 7개 그룹의 구성원일 뿐이고, 그 7개는 팀원이 운영사별 입항정보 문서
+#   ({운영사}_입항정보_9.8)에서 임계값을 뽑아낼 수 있었던 것만 모은 결과다.
+#   S-Oil부이·S-Oil&오일허브 부이가 빠진 것은 "온산이 아니라서"가 아니라 "S-OIL 문서에
+#   부이 기준이 없어서"다. 실제로 원유 화물의 적합 선석 4곳은 전부 berth_group이
+#   None이라, 이 매핑으로 후보를 거르면 원유 배정이 통째로 불가가 된다.
+#   스코프 판정은 아래 ONSAN_SCOPE_WHARF_NAMES(= Berth.onsan_scope)를 쓸 것.
 ONSAN_BERTH_GROUP_MAP: dict[str, str] = {
     "OTK1부두": "OTK1/2부두(처용리)",
     "OTK2부두": "OTK1/2부두(처용리)",
@@ -127,10 +135,21 @@ ONSAN_BERTH_GROUP_MAP: dict[str, str] = {
     "석유공사부이": "한국석유공사원유부이",
 }
 
-# 온산 MVP가 정의한 온산 스코프(액체화물 12부두 + 부이 3기). 좌표 거리 기반
-# ADJACENT_TO/SUBSTITUTABLE_WITH 자동 계산을 이 범위로 한정할 때 쓴다 — 울산항
-# 전체 69개 선석 중 무관한 조합(예: 컨테이너부두 vs 벌크부두)까지 계산하지
-# 않기 위함. 이 스코프 밖 선석은 그래프 적재 자체에는 영향 없다.
+# 온산 MVP가 정의한 온산 스코프 — 액체화물 전용부두 11개 + 부이 3기 = 14개.
+#
+# 두 곳에서 쓴다:
+#   1) 좌표 거리 기반 ADJACENT_TO/SUBSTITUTABLE_WITH 자동 계산 범위 한정.
+#      울산항 전체 69개 선석 중 무관한 조합(컨테이너부두 vs 벌크부두)까지
+#      계산하지 않기 위함. 이 스코프 밖 선석도 그래프 적재 자체는 된다.
+#   2) Berth.onsan_scope 속성으로 적재되어, 스케줄링 후보 정렬에서 온산을
+#      앞세우는 데 쓰인다(backend scheduling/service.py). 하드 필터가 아니라
+#      정렬 우선순위다 — 온산 후보가 3개 미만인 화물(원유 등)에서 후보가
+#      0개가 되는 것을 피하기 위해서다.
+#
+# 온산항 20개 선석 중 6개는 의도적으로 제외했다: 온산1(잡화)·온산2,3(광석)·
+# 온산4(시멘트)·정일컨(컨테이너)은 액체화물이 아니고, 달포부두는 유류를 취급하나
+# 공용부두(수심 7m)라 "파이프라인이 탱크단지로 고정된 전용부두"라는 온산 MVP
+# 모델에 맞지 않는다. 달포부두 제외가 의도인지 누락인지는 원작자 확인이 필요하다.
 ONSAN_SCOPE_WHARF_NAMES: set[str] = {
     "OTK1부두", "OTK2부두", "정일1부두", "정일2부두", "UTK부두", "대한유화부두",
     "효성부두", "S-Oil 1부두", "S-Oil 2부두", "S-Oil 3부두", "S-Oil 4부두",
@@ -216,6 +235,7 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
             "longitude": row["longitude"],
             "categories": _split_cargo_categories(row["handling_cargo_name"]),
             "berth_group": ONSAN_BERTH_GROUP_MAP.get(name),
+            "onsan_scope": name in ONSAN_SCOPE_WHARF_NAMES,
         })
     return batch
 
@@ -239,6 +259,7 @@ ON CREATE SET
     b.latitude            = row.latitude,
     b.longitude           = row.longitude,
     b.berth_group         = row.berth_group,
+    b.onsan_scope         = row.onsan_scope,
     b.created_at          = datetime()
 ON MATCH SET
     b.wharf_name          = row.wharf_name,
@@ -252,6 +273,7 @@ ON MATCH SET
     b.latitude            = row.latitude,
     b.longitude           = row.longitude,
     b.berth_group         = row.berth_group,
+    b.onsan_scope         = row.onsan_scope,
     b.updated_at          = datetime()
 """
 
