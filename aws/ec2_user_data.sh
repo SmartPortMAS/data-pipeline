@@ -24,10 +24,13 @@ dnf install -y python3.11 python3.11-pip cronie unzip
 systemctl enable --now crond
 
 # 2) 파이프라인 코드 (S3 에 올려둔 zip)
+# unzip 은 "경고"만 있어도 종료코드 1을 내므로(윈도우 zip 의 구분자 경고 등)
+# set -e 에 죽지 않게 하고, 실제 성공 여부는 폴더 존재로 판정한다.
 aws s3 cp "s3://$BUCKET/code/data-pipeline.zip" /tmp/dp.zip
-unzip -o /tmp/dp.zip -d $BASE
+unzip -o /tmp/dp.zip -d $BASE || true
 # zip 루트 폴더명이 달라도 data-pipeline 으로 통일
 [ -d $BASE/data-pipeline ] || mv $BASE/data-pipeline-* $BASE/data-pipeline
+[ -f $BASE/data-pipeline/data_pipeline/run_pipeline.py ] || { echo "압축 해제 실패" >> $BASE/logs/setup.log; exit 1; }
 
 # 3) 의존성 — 수집·전처리에 필요한 것만 (DB 드라이버는 로더 임포트용 최소 포함)
 python3.11 -m pip install --no-cache-dir \
