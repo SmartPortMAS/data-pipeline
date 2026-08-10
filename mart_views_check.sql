@@ -203,11 +203,26 @@ FROM (
 
 -- [검증 12] 수집기 생존 신호가 계산되는가
 --   전면 침묵(수집기 장애)과 "항만이 비었다"를 구별하기 위한 뷰.
+--
+--   ★ 초록불 오탐 방지가 이 검증의 핵심이다. 이전 판은 collected_at_utc 만 보고
+--     판정해서, 옛 raw 를 재처리하기만 해도 OK 가 떴다(원천 21.5일 전인데 OK).
+--     아래 단언은 "수집은 최신인데 원천만 낡은" 상태가 OK 로 새어나가지 않는지를
+--     직접 확인한다 — 이 조합이면 반드시 STALE_SOURCE 여야 한다.
 SELECT '12. 수집기 생존 신호' AS check_name,
-       CASE WHEN pipeline_state IS NULL THEN 'FAIL (pipeline_health 계산 불가)'
-            WHEN pipeline_state = 'NO_DATA' THEN 'PASS (적재 데이터 없음 — NO_DATA)'
+       CASE WHEN pipeline_state IS NULL
+              THEN 'FAIL (pipeline_health 계산 불가)'
+            WHEN pipeline_state NOT IN ('OK', 'COLLECTOR_DOWN', 'STALE_SOURCE', 'NO_DATA')
+              THEN 'FAIL (허용외 상태값: ' || pipeline_state || ')'
+            -- 초록불 오탐: 원천이 60분 이상 낡았는데 OK 라고 하면 판정 순서가 깨진 것
+            WHEN pipeline_state = 'OK' AND source_age_min > 60
+              THEN 'FAIL (원천 ' || source_age_min || '분 낡았는데 OK — STALE_SOURCE 여야 함)'
+            -- 수집기가 죽었는데 OK 라고 하는 경우
+            WHEN pipeline_state = 'OK' AND collect_age_min > 20
+              THEN 'FAIL (수집 ' || collect_age_min || '분 중단인데 OK — COLLECTOR_DOWN 이어야 함)'
+            WHEN pipeline_state = 'NO_DATA'
+              THEN 'PASS (적재 데이터 없음 — NO_DATA)'
             ELSE 'PASS (' || pipeline_state || ', 수집경과 ' || collect_age_min
-                 || '분 / 원천경과 ' || source_age_min || '분)'
+                 || '분 / 원천경과 ' || source_age_min || '분 — ' || diagnosis || ')'
        END AS result
 FROM mart.pipeline_health;
 

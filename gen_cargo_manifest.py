@@ -69,6 +69,20 @@ TARGET_ROWS = 365
 # ---------------------------------------------------------------------------
 # 스키마 정본 — mart_views.sql 의 CREATE TABLE upa_cargo_manifest 와 1:1 일치.
 # 컬럼 순서까지 맞춰 두면 적재 시 스키마 불일치가 나지 않는다. (WBS 1.5)
+#
+# ★ 2026-08-04 확정 — bzentyCd(업체코드)는 영구 미확보 (멘토 승인, 재추진 없음).
+#   즉 getIntgCagInfo/getInprtCagDclrInfo 는 앞으로도 호출 불가능하다.
+#   그럼에도 39컬럼 전부를 유지하는 이유:
+#     - 아래 컬럼 중 io_se_code/pod_name/mrn_no 등 27개는 마트 뷰 어디서도
+#       실제로 조회하지 않는다(전수 확인함). 안 써도 존재 자체가 문제를 만들지
+#       않는다 — 전부 NULL 로 채워질 뿐이다.
+#     - UPA 화물 API 응답 필드와 1:1 매핑된 스펙이라, 지금 줄였다가 나중에
+#       (수동 화물 신고서 입력 등 대체 경로가 생기면) 다시 늘리는 것보다,
+#       "매핑 자리는 유지하되 값은 영구 NULL"이 더 안전하다.
+#   컬럼을 줄이면 이 파일 + mart_views.sql 의 CREATE TABLE 두 곳을 같이 고치고
+#   재검증해야 하는데, 실제로 얻는 이득(로직 변화)이 없어 지금 시점엔 손대지
+#   않는다. 컬럼이 왜 비어 있는지 몰라 헷갈리는 게 목적이면, 삭제가 아니라
+#   이 주석으로 답한다.
 # ---------------------------------------------------------------------------
 SCHEMA_COLUMNS = [
     "port_code", "ptent_yr", "voyage_no", "callsgn", "vessel_name",
@@ -223,13 +237,33 @@ VIOLATION_CARGO = {
 #   달라지므로 울산항 각 터미널 운영규정으로 확정해야 한다(미확보 — 한계로 보고).
 UKC_RATIO = 0.10
 
-# SK 부두 수심(m) — UPA 부두 명세.
+# 울산항 부두 수심(m) — 출처: 울산지방해양수산청 「울산항시설현황」
 #   ★ 이 값은 **해도기준면(Chart Datum) 기준 수심**이다. 그 시각의 실제
 #     가용수심은 여기에 조위(tide_obs.tide_level_cm)를 더해야 나온다.
 #     흘수 판정에 조위를 빼먹으면 만조에만 접안 가능한 배를 영구 불가로 오판한다.
+#
+#   정본은 data/seed/ulsan_berth_spec_seed.csv (선석수·안벽길이·DWT·운영주체 포함).
+#   mart_views.sql 의 berth_draught_check 와 반드시 같은 값이어야 한다 —
+#   둘이 갈리면 생성한 위반 시나리오와 실제 판정이 어긋난다.
+#
+#   선석별 수심이 다른 부두는 **안전측 최소값**을 쓴다. 부두명까지만 알고
+#   몇 번 선석인지는 모르므로, 깊은 쪽을 쓰면 착저인 배를 OK 로 오판한다.
+#     SK2부두 7.5(중력식 1선석)/8(잔교식 4선석) → 7.5
+#     SK5부두 원문 '7-11' 범위(5선석)          → 7
+#   부이(수심 27m)와 3부두(원문 '9,12' 로 모호)는 제외한다.
 BERTH_DEPTH_M = {
-    "SK1부두": 7.5, "SK2부두": 8.0, "SK3부두": 12.0, "SK4부두": 10.0,
-    "SK5부두": 11.0, "SK6부두": 15.0, "SK7부두": 15.0, "SK8부두": 18.0,
+    # 본항
+    "4부두": 11.0, "6부두": 12.0, "용잠부두": 7.0, "가스부두": 7.5, "UTT부두": 11.0,
+    "SK1부두": 7.5, "SK2부두": 7.5, "SK3부두": 12.0, "SK4부두": 10.0,
+    "SK5부두": 7.0, "SK6부두": 15.0, "SK7부두": 15.0, "SK8부두": 18.0,
+    # 온산항
+    "효성부두": 12.0, "달포부두": 7.0, "UTK부두": 12.0, "대한유화부두": 12.0,
+    "OTK1부두": 11.0, "OTK2부두": 9.0,
+    "S-Oil 1부두": 11.0, "S-Oil 2부두": 15.5, "S-Oil 3부두": 14.0, "S-Oil 4부두": 12.0,
+    "정일1부두": 11.0, "정일2부두": 12.5,
+    # 울산신항
+    "정일스톨트헤븐 신항 3~5부두": 14.0, "현대오일터미널 신항부두": 14.0,
+    "LS니꼬 신항부두": 14.0, "UTK 신항부두": 14.0,
 }
 
 # ---------------------------------------------------------------------------
@@ -336,9 +370,20 @@ def pick_cargo(cat, is_liquid, estimated):
     return DEFAULT_DRY_CARGO, None, None, None, "선종미상-추정"
 
 
+# io_se_code(I/O)와 io_se_name(수입/수출)이 각자 독립 random.choice() 로 뽑혀
+# 375행 중 180행이 코드-이름 모순이었다(I인데 수출, O인데 수입). 하나를 정하고
+# 나머지는 파생시켜야 한다. pod_name(양하항)/pol_name(적하항)도 마찬가지로
+# 수출입 방향과 무관하게 pod_name="울산" 고정이라, 수출 화물인데 도착항이
+# 울산으로 찍히는 오류가 있었다 — 수입이면 울산이 도착지(pod), 수출이면
+# 울산이 출발지(pol)여야 한다.
+IO_SE_NAME_BY_CODE = {"I": "수입", "O": "수출"}
+FOREIGN_PORTS = ["SINGAPORE", "DALIAN", "휴스턴", "여수", "ONSAN"]
+
+
 def make_row(callsgn, vessel_name, cat, cargo, un_no, basis, facility, seq):
     """SCHEMA_COLUMNS 전 항목을 채운 1행 (WBS 1.5)."""
     wton = round(random.uniform(500, 50000) if un_no else random.uniform(100, 20000), 1)
+    io_se_code = random.choice(["I", "O"])
     return {
         "port_code": "KRUSN",
         "ptent_yr": "2026",
@@ -351,8 +396,8 @@ def make_row(callsgn, vessel_name, cat, cargo, un_no, basis, facility, seq):
         "mrn_no": f"MRN{random.randint(10000, 99999)}",
         "bl_no": f"BL{seq:06d}",
         "master_bl_no": f"MBL{random.randint(10000, 99999)}",
-        "io_se_code": random.choice(["I", "O"]),
-        "io_se_name": random.choice(["수입", "수출"]),
+        "io_se_code": io_se_code,
+        "io_se_name": IO_SE_NAME_BY_CODE[io_se_code],
         "facility_name": facility,
         "cargo_se_name": "액체" if un_no else "일반",
         "cargo_name_raw": cargo,
@@ -368,8 +413,8 @@ def make_row(callsgn, vessel_name, cat, cargo, un_no, basis, facility, seq):
         "bulk_vol_size": round(wton * 1.1, 1) if un_no else None,
         "bulk_weight_size": wton if un_no else None,
         "container_count": None,
-        "pod_name": "울산",
-        "pol_name": random.choice(["SINGAPORE", "DALIAN", "휴스턴", "여수", "ONSAN"]),
+        "pod_name": "울산" if io_se_code == "I" else random.choice(FOREIGN_PORTS),
+        "pol_name": random.choice(FOREIGN_PORTS) if io_se_code == "I" else "울산",
         "ldud_port_name": None,
         "last_dest_port_name": None,
         "arrival_at_utc": "2026-07-27 00:00:00+00:00",

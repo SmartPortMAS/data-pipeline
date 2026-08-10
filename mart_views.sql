@@ -65,6 +65,10 @@
 --   6. mart.dashboard_current      '한 줄 조회' — 대시보드·에이전트 진입점
 --        위치 --vessel_uid--> 식별 / 위치 --callsgn--> 입항·화물 / 기상 CROSS
 --   7. mart.pipeline_health        수집기 생존 신호 (조인 없음, 단일 집계행)
+--   8. mart.berth_current_cargo    선석별 현재 취급 화물 → chem_id (백엔드 소비 계약)
+--        재항선박 --callsgn--> 화물 --dg_un_no--> MSDS --> chem_id
+--        ★ backend/app/agents/scheduling/category_map.py 의 카테고리 대표값
+--          근사를 대체한다 (그 파일 주석이 이 뷰를 기다리고 있다)
 --   (+ mart.msds_flat             msds_chemical JSONB 평탄화 — cargo_msds 가 사용)
 -- ===========================================================================
 
@@ -722,11 +726,44 @@ WITH tide AS (
     FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1
 ),
 berth AS (
-    -- 해도기준면 수심(m). 현재는 SK 부두만 명세를 확보했다.
-    -- 부두 명세를 더 확보하면 이 목록을 시드 테이블로 옮길 것.
+    -- -----------------------------------------------------------------------
+    -- 울산항 부두 제원 (해도기준면 수심 m)
+    --
+    -- 출처: 울산지방해양수산청 「울산항시설현황」 (본항 15부두·부이 2기 /
+    --       온산항 12부두·부이 3기 / 울산신항 6부두 — 총 35부두 67선석)
+    --       원본: data/seed/ulsan_berth_spec_seed.csv (선석수·안벽길이·DWT 포함)
+    --
+    -- ★ 안전측 최소값 원칙
+    --   같은 부두명에 선석별 수심이 다른 경우가 있다. 우리 데이터(upa_port_call)
+    --   는 부두명까지만 알고 몇 번 선석인지는 모르므로, 가장 얕은 수심을 쓴다.
+    --   깊은 쪽을 쓰면 실제로는 착저인 배를 OK 로 오판할 수 있다.
+    --     SK2부두 : 중력식 7.5m(1선석) + 잔교식 8m(4선석) → 7.5 적용
+    --     SK5부두 : 원문 '7-11' 범위(5선석)              → 7   적용
+    --
+    -- ★ 제외 대상
+    --   부이(SK부이II·III, S-Oil 부이, 석유공사부이 등 수심 27m)는 접안이 아니라
+    --   해상 계류라 안벽 UKC 개념이 다르다. 여기 목록에서 뺀다.
+    --   3부두는 원문 수심 표기가 '9,12' 로 모호해(9m/12m 인지 9.12m 인지) 제외.
+    --   → 목록에 없는 부두는 chart_depth_m NULL → draught_verdict 'UNKNOWN' 이 된다.
+    --     "모르는 것을 안전으로 간주하지 않는다"는 이 프로젝트 원칙과 같다.
+    -- -----------------------------------------------------------------------
     SELECT * FROM (VALUES
-        ('SK1부두', 7.5), ('SK2부두', 8.0), ('SK3부두', 12.0), ('SK4부두', 10.0),
-        ('SK5부두', 11.0), ('SK6부두', 15.0), ('SK7부두', 15.0), ('SK8부두', 18.0)
+        -- 본항
+        ('4부두',        11.0), ('6부두',        12.0), ('용잠부두',      7.0),
+        ('가스부두',      7.5), ('UTT부두',      11.0),
+        ('SK1부두',       7.5), ('SK2부두',       7.5), ('SK3부두',      12.0),
+        ('SK4부두',      10.0), ('SK5부두',       7.0), ('SK6부두',      15.0),
+        ('SK7부두',      15.0), ('SK8부두',      18.0),
+        -- 온산항
+        ('효성부두',     12.0), ('달포부두',      7.0), ('UTK부두',      12.0),
+        ('대한유화부두', 12.0), ('OTK1부두',     11.0), ('OTK2부두',      9.0),
+        ('S-Oil 1부두',  11.0), ('S-Oil 2부두',  15.5), ('S-Oil 3부두',  14.0),
+        ('S-Oil 4부두',  12.0), ('정일1부두',    11.0), ('정일2부두',    12.5),
+        -- 울산신항
+        ('정일스톨트헤븐 신항 3~5부두', 14.0),
+        ('현대오일터미널 신항부두',     14.0),
+        ('LS니꼬 신항부두',             14.0),
+        ('UTK 신항부두',                14.0)
     ) AS t(facility_name, chart_depth_m)
 ),
 vessel AS (
@@ -771,7 +808,12 @@ SELECT
     v.received_at_utc                                   AS draught_observed_at_utc,
     pc.arrival_at_utc
 FROM pc
-JOIN berth  b ON b.facility_name = pc.facility_name
+-- ★ LEFT JOIN 이어야 한다. INNER JOIN 이면 위 berth 목록에 없는 부두(제원 미확보,
+--   부이, 신규 부두)에 접안한 선박이 판정 결과에서 통째로 사라진다. 그러면
+--   "위험하지 않다"가 아니라 "아예 안 보인다"가 되어 UNIDENTIFIED·NO_SIGNAL 을
+--   살려둔 이 프로젝트 원칙과 정면으로 어긋난다.
+--   목록에 없으면 chart_depth_m 이 NULL 이 되고 draught_verdict 는 'UNKNOWN' 이다.
+LEFT JOIN berth  b ON b.facility_name = pc.facility_name
 LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
@@ -890,6 +932,31 @@ LEFT JOIN mart.weather_now         wn  ON TRUE;
 --     - collect_age_min 이 크다        → 우리 파이프라인 장애
 --     - source_age_min 만 크다         → UPA 쪽 갱신 지연 (우리는 정상)
 --   이 둘을 구분해야 장애 대응 대상이 정해진다.
+--
+-- ★ 2026-08-04 수정 — 초록불 오탐 제거
+--   이전 판은 pipeline_state 를 collected_at_utc 하나로만 판정했다. 그 결과
+--   "옛날 raw 파일을 다시 전처리하기만 해도" OK 가 떴다. 실측 재현:
+--       collect_age_min 1분(방금 돌림) / source_age_min 31,011분(21.5일 전 데이터)
+--       → pipeline_state = 'OK'          ← 3주 전 위치를 정상이라고 표시
+--   관제사가 초록 배지를 보고 안심하는데 화면에는 3주 전 선박이 떠 있는
+--   상황이 가능하다. 이 뷰가 막으려던 사고와 정확히 같은 종류다.
+--
+--   그래서 상태를 2개(OK/DEGRADED)에서 4개로 나누고, 원인별로 대응 주체가
+--   갈리도록 diagnosis 문장을 함께 낸다. 판정 순서가 중요하다 —
+--   수집기가 죽었으면 원천 신선도는 볼 필요도 없으므로 COLLECTOR_DOWN 이 먼저다.
+--
+--     OK              둘 다 최신
+--     COLLECTOR_DOWN  우리 수집기가 20분 이상 안 돎        → 데이터 담당
+--     STALE_SOURCE    수집은 도는데 원천이 60분 이상 낡음  → UPA 문의 / 옛 raw 재처리 의심
+--     NO_DATA         적재 데이터 자체가 없음              → 초기 상태
+--
+--   ※ 임계값(20분/60분)은 잠정값이다. 수집 주기(현재 6분)와 UPA 자체 갱신
+--     주기에 맞춰 재산정해야 하며, mart_views_check.sql 의 관측간격 분위수
+--     쿼리로 근거를 만들 수 있다.
+--
+--   ※ 프론트 규약: pipeline_state <> 'OK' 이면 지도를 비우는 대신 배너를
+--     띄운다. COLLECTOR_DOWN 과 STALE_SOURCE 는 문구가 달라야 한다 —
+--     전자는 "우리 시스템 점검 중", 후자는 "원천 데이터 갱신 지연"이다.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.pipeline_health AS
 SELECT
@@ -901,7 +968,82 @@ SELECT
     count(DISTINCT vessel_uid)                                             AS vessel_uid_total,
     CASE
         WHEN max(collected_at_utc) IS NULL                        THEN 'NO_DATA'
-        WHEN max(collected_at_utc) < now() - interval '20 min'    THEN 'DEGRADED'
+        WHEN max(collected_at_utc) < now() - interval '20 min'    THEN 'COLLECTOR_DOWN'
+        WHEN max(received_at_utc)  < now() - interval '60 min'    THEN 'STALE_SOURCE'
         ELSE 'OK'
-    END                                                                    AS pipeline_state
+    END                                                                    AS pipeline_state,
+    -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
+    -- 관제사·개발자가 "그래서 뭘 해야 하나"를 배지 하나로 알 수 있게 한다.
+    CASE
+        WHEN max(collected_at_utc) IS NULL
+            THEN '적재 데이터 없음 — 파이프라인을 한 번도 돌리지 않았거나 테이블이 비어 있음'
+        WHEN max(collected_at_utc) < now() - interval '20 min'
+            THEN '우리 수집기가 안 돌고 있음 — run_pipeline 실행/스케줄러 상태 확인'
+        WHEN max(received_at_utc) < now() - interval '60 min'
+            THEN '수집은 도는데 원천 데이터가 낡음 — UPA 갱신 지연 또는 옛 raw 재처리 의심'
+        ELSE '정상'
+    END                                                                    AS diagnosis
 FROM upa_vessel_position;
+
+-- ---------------------------------------------------------------------------
+-- 8. mart.berth_current_cargo — 선석별 "지금 취급 중인 화물" (백엔드 소비 계약)
+--
+-- ★ 왜 필요한가 — 백엔드의 알려진 한계 #1 을 없애는 뷰다.
+--   backend/app/agents/scheduling/category_map.py 는 인접 선석의 화물을 몰라서
+--   카테고리 대표 1종으로 근사하고 있다:
+--       원유 → 석유(000751) / 유류 → 디젤(000973) / 액체화학 → 벤젠(001008)
+--   그 파일 주석도 "upa_cargo_manifest 파이프라인이 생기면 이 모듈 대신 실제
+--   최근 하역 기록을 조회하도록 교체해야 한다"고 적어두었다. 이 뷰가 그 대체물이다.
+--
+--   실제 영향(그 문서 인용): "정일1부두에 실제로는 톨루엔이 있는데도 시스템은
+--   '액체화학이니까 벤젠이 있다고 치자'고 판단한다" — 즉 혼재금지 판정이 엉뚱한
+--   화물 조합으로 이뤄진다. 이 뷰를 쓰면 실제 신고 화물로 판정하게 된다.
+--
+-- ★ 출력 계약 — 스케줄링 에이전트가 그대로 쓸 수 있는 모양
+--   AdjacentCargo(berth_name=facility_name, cargo=CargoRef(chem_id=chem_id))
+--   CargoRef 는 chem_id 또는 cas_no 중 하나면 되므로 둘 다 내보낸다.
+--   (백엔드는 un_no 로 조회하지 않는다 — msds_context.py 는 cas_no/chem_id 만 쓴다.
+--    un_no 는 msds_chemical 의 표시용 컬럼이고 WHERE 절에 등장하지 않는다.
+--    화물 manifest 에는 UN 번호만 있으므로, UN → chem_id 변환이 이 뷰의 핵심이다.)
+--
+-- ★ "지금"의 정의
+--   upa_port_call 에 입항 기록이 있고 departure_at_utc 가 NULL 인 선박 = 재항 중.
+--   출항 신고가 확정된 배의 화물은 그 선석에 없으므로 제외한다.
+--   (vessel_latest_position 의 presence_state 와 같은 원칙 — 출항은 서류로 확정)
+--
+-- ★ 한계 (숨기지 않는다)
+--   - is_synthetic=true 인 화물이 섞여 있다. bzentyCd(업체코드) 미확보로 UPA
+--     통합화물 API 를 못 부르는 동안의 합성 샘플이다. 소비자가 판단하도록 그대로
+--     노출한다. 실화물만 원하면 WHERE is_synthetic = false 를 붙일 것.
+--   - MSDS 에 없는 UN 번호는 chem_id 가 NULL 이다. 이 행을 버리지 않는다 —
+--     "위험물이 있는데 정체를 모른다"는 것이 "화물이 없다"보다 중요한 정보다.
+--     소비자는 chem_id IS NULL 을 '미확인 위험'으로 다뤄야 한다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.berth_current_cargo AS
+WITH in_port AS (
+    -- 재항 중인 선박 (출항 신고 없음) — 선박당 최신 입항 건 1개
+    SELECT DISTINCT ON (upper(btrim(callsgn)))
+           upper(btrim(callsgn)) AS callsgn,
+           facility_name,
+           arrival_at_utc
+    FROM upa_port_call
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+      AND departure_at_utc IS NULL
+    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC
+)
+SELECT DISTINCT
+       COALESCE(cm.facility_name, ip.facility_name) AS facility_name,
+       ip.callsgn,
+       cm.chem_id,
+       cm.cas_no,
+       cm.dg_un_no,
+       COALESCE(cm.msds_name_ko, cm.cargo_name_raw)  AS cargo_name,
+       cm.imdg_class,
+       cm.packing_group,
+       cm.msds_matched,
+       cm.is_synthetic,
+       cm.cargo_basis,
+       ip.arrival_at_utc
+FROM in_port ip
+JOIN mart.cargo_msds cm ON cm.callsgn = ip.callsgn
+WHERE cm.dg_un_no IS NOT NULL;   -- 위험물 화물만 (혼재금지 판정 대상)
