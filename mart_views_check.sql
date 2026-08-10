@@ -208,16 +208,21 @@ FROM (
 --     판정해서, 옛 raw 를 재처리하기만 해도 OK 가 떴다(원천 21.5일 전인데 OK).
 --     아래 단언은 "수집은 최신인데 원천만 낡은" 상태가 OK 로 새어나가지 않는지를
 --     직접 확인한다 — 이 조합이면 반드시 STALE_SOURCE 여야 한다.
+--
+--   ★ 임계값은 뷰 정의(mart_views.sql)와 반드시 같아야 한다. 2026-08-10 에
+--     수집 주기가 6분(로컬 폴링) → 60분(AWS 정각 수집)으로 바뀌면서
+--     120분/180분으로 재산정했다. 뷰만 고치고 여기를 안 고치면 정상 상태가
+--     FAIL 로 잡힌다 — 검증이 오히려 거짓 경보를 내는 상태가 된다.
 SELECT '12. 수집기 생존 신호' AS check_name,
        CASE WHEN pipeline_state IS NULL
               THEN 'FAIL (pipeline_health 계산 불가)'
             WHEN pipeline_state NOT IN ('OK', 'COLLECTOR_DOWN', 'STALE_SOURCE', 'NO_DATA')
               THEN 'FAIL (허용외 상태값: ' || pipeline_state || ')'
-            -- 초록불 오탐: 원천이 60분 이상 낡았는데 OK 라고 하면 판정 순서가 깨진 것
-            WHEN pipeline_state = 'OK' AND source_age_min > 60
+            -- 초록불 오탐: 원천이 180분 이상 낡았는데 OK 라고 하면 판정 순서가 깨진 것
+            WHEN pipeline_state = 'OK' AND source_age_min > 180
               THEN 'FAIL (원천 ' || source_age_min || '분 낡았는데 OK — STALE_SOURCE 여야 함)'
             -- 수집기가 죽었는데 OK 라고 하는 경우
-            WHEN pipeline_state = 'OK' AND collect_age_min > 20
+            WHEN pipeline_state = 'OK' AND collect_age_min > 120
               THEN 'FAIL (수집 ' || collect_age_min || '분 중단인데 OK — COLLECTOR_DOWN 이어야 함)'
             WHEN pipeline_state = 'NO_DATA'
               THEN 'PASS (적재 데이터 없음 — NO_DATA)'

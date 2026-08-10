@@ -75,6 +75,44 @@
 CREATE SCHEMA IF NOT EXISTS mart;
 
 -- ---------------------------------------------------------------------------
+-- 0-A. 기존 뷰 제거 (재실행 안전성)
+--
+-- ★ 왜 DROP 이 필요한가 — CREATE OR REPLACE VIEW 의 제약
+--   PostgreSQL 의 CREATE OR REPLACE VIEW 는 "기존 컬럼 목록 뒤에 새 컬럼을
+--   덧붙이는" 변경만 허용한다. 컬럼을 중간에 끼워 넣거나, 순서·이름·타입을
+--   바꾸면 다음과 같이 실패한다:
+--       ERROR: cannot change name of view column "nav_status_code" to "heading"
+--
+--   실제로 그 사고가 났다 (2026-08-10, PR #23 리뷰에서 재현):
+--   vessel_latest_position 에 heading/draught 를 sog·cog 옆(중간)에 추가했더니
+--   신규 DB 에서는 통과하고 기존 DB 에서만 실패했다. 만든 사람은 신규 DB 라
+--   못 보고, 받는 사람은 기존 DB 라 바로 깨지는 — 가장 늦게 발견되는 형태다.
+--
+--   해법으로 "새 컬럼은 항상 맨 뒤에 붙이기" 규칙을 지킬 수도 있지만,
+--   그러면 cog 옆에 있어야 할 heading 이 파일 맨 끝에 홀로 떨어져 가독성이
+--   나빠지고, 규칙을 한 번만 어겨도 같은 사고가 반복된다.
+--   뷰는 데이터를 갖지 않으므로(정의만 있음) 지웠다 다시 만드는 비용이 0 이다.
+--   구조적으로 막는 쪽을 택한다.
+--
+-- ★ CASCADE 를 쓰지 않는 이유
+--   CASCADE 는 이 뷰에 의존하는 "우리가 모르는 객체"(백엔드가 만든 뷰 등)까지
+--   조용히 같이 지운다. 여기서는 의존 역순으로 명시 삭제만 하고, 외부 의존이
+--   있으면 에러로 드러나게 둔다 — 조용한 파괴보다 시끄러운 실패가 낫다.
+--
+-- ★ 삭제 순서 = 생성 역순 (의존하는 쪽을 먼저 지운다)
+-- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS mart.berth_current_cargo;
+DROP VIEW IF EXISTS mart.pipeline_health;
+DROP VIEW IF EXISTS mart.dashboard_current;
+DROP VIEW IF EXISTS mart.berth_draught_check;
+DROP VIEW IF EXISTS mart.weather_now;
+DROP VIEW IF EXISTS mart.cargo_msds;
+DROP VIEW IF EXISTS mart.msds_flat;
+DROP VIEW IF EXISTS mart.port_call_overview;
+DROP VIEW IF EXISTS mart.vessel_latest_position;
+DROP VIEW IF EXISTS mart.vessel_identity;
+
+-- ---------------------------------------------------------------------------
 -- 0. 선행 조건: 참조 테이블 존재 보장 (빈 테이블이라도)
 --
 -- PostgreSQL 은 CREATE VIEW 시점에 참조 테이블의 "존재"를 검사한다(데이터는 안
@@ -958,13 +996,29 @@ LEFT JOIN mart.weather_now         wn  ON TRUE;
 --   수집기가 죽었으면 원천 신선도는 볼 필요도 없으므로 COLLECTOR_DOWN 이 먼저다.
 --
 --     OK              둘 다 최신
---     COLLECTOR_DOWN  우리 수집기가 20분 이상 안 돎        → 데이터 담당
---     STALE_SOURCE    수집은 도는데 원천이 60분 이상 낡음  → UPA 문의 / 옛 raw 재처리 의심
+--     COLLECTOR_DOWN  우리 수집기가 120분 이상 안 돎       → 데이터 담당
+--     STALE_SOURCE    수집은 도는데 원천이 180분 이상 낡음 → UPA 문의 / 옛 raw 재처리 의심
 --     NO_DATA         적재 데이터 자체가 없음              → 초기 상태
 --
---   ※ 임계값(20분/60분)은 잠정값이다. 수집 주기(현재 6분)와 UPA 자체 갱신
---     주기에 맞춰 재산정해야 하며, mart_views_check.sql 의 관측간격 분위수
---     쿼리로 근거를 만들 수 있다.
+-- ★ 2026-08-10 임계값 재산정 (20분/60분 → 120분/180분)
+--   이전 값(20분/60분)은 로컬에서 6분 주기로 폴링하던 시절 기준이었다.
+--   AWS 무인 수집기(PR #22)로 넘어가면서 수집 주기가 **매시 정각 1회**가 됐고,
+--   그 결과 정상 운영 중에도 장애로 표시되는 반대 방향 오탐이 생겼다.
+--     실측(PR #23 리뷰): 마지막 수집 27분 경과 — 정상인데 COLLECTOR_DOWN
+--
+--   이 뷰는 원래 "초록불 오탐"(장애인데 정상이라 표시)을 막으려고 만든 것인데,
+--   반대로 "빨간불 오탐"(정상인데 장애라 표시)이 잦으면 관제사가 배지를
+--   무시하게 되어 결국 같은 곳으로 간다. 두 방향 다 막아야 의미가 있다.
+--
+--   새 값의 근거 — 수집 주기 60분 기준:
+--     COLLECTOR_DOWN 120분 = 정각 수집을 2회 연속 놓침. 1회 실패는 일시적
+--       네트워크 오류로도 발생하므로 즉시 장애로 부르지 않는다.
+--     STALE_SOURCE  180분 = 원천 신선도는 "수집 주기(최대 60분 지연) + 원천
+--       자체 갱신 지연"의 합이라 수집기 기준보다 넉넉해야 한다. 60분으로 두면
+--       매시 수집 직전(59분 경과)마다 STALE_SOURCE 가 깜빡인다.
+--
+--   ※ 수집 주기가 다시 바뀌면 이 두 값도 같이 바꿔야 한다. 근거는
+--     mart_views_check.sql 의 관측간격 분위수 쿼리로 다시 만들 수 있다.
 --
 --   ※ 프론트 규약: pipeline_state <> 'OK' 이면 지도를 비우는 대신 배너를
 --     띄운다. COLLECTOR_DOWN 과 STALE_SOURCE 는 문구가 달라야 한다 —
@@ -980,8 +1034,8 @@ SELECT
     count(DISTINCT vessel_uid)                                             AS vessel_uid_total,
     CASE
         WHEN max(collected_at_utc) IS NULL                        THEN 'NO_DATA'
-        WHEN max(collected_at_utc) < now() - interval '20 min'    THEN 'COLLECTOR_DOWN'
-        WHEN max(received_at_utc)  < now() - interval '60 min'    THEN 'STALE_SOURCE'
+        WHEN max(collected_at_utc) < now() - interval '120 min'   THEN 'COLLECTOR_DOWN'
+        WHEN max(received_at_utc)  < now() - interval '180 min'   THEN 'STALE_SOURCE'
         ELSE 'OK'
     END                                                                    AS pipeline_state,
     -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
@@ -989,9 +1043,9 @@ SELECT
     CASE
         WHEN max(collected_at_utc) IS NULL
             THEN '적재 데이터 없음 — 파이프라인을 한 번도 돌리지 않았거나 테이블이 비어 있음'
-        WHEN max(collected_at_utc) < now() - interval '20 min'
-            THEN '우리 수집기가 안 돌고 있음 — run_pipeline 실행/스케줄러 상태 확인'
-        WHEN max(received_at_utc) < now() - interval '60 min'
+        WHEN max(collected_at_utc) < now() - interval '120 min'
+            THEN '우리 수집기가 안 돌고 있음(정각 수집 2회 이상 누락) — EC2 스케줄러/run_pipeline 상태 확인'
+        WHEN max(received_at_utc) < now() - interval '180 min'
             THEN '수집은 도는데 원천 데이터가 낡음 — UPA 갱신 지연 또는 옛 raw 재처리 의심'
         ELSE '정상'
     END                                                                    AS diagnosis
