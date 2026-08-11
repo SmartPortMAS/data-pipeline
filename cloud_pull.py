@@ -63,7 +63,7 @@ def collector_health(s3) -> None:
         h = json.loads(buf.getvalue())
         print(f"  클라우드 수집기 마지막 실행: {h.get('last_run_utc')} (exit={h.get('exit_code')})")
     except Exception:
-        print("  (클라우드 수집기 생존 신호 없음 — 아직 EC2 첫 실행 전인지 확인)")
+        print("  (클라우드 수집기 생존 신호 없음 - 아직 EC2 첫 실행 전인지 확인)")
 
 
 def load_to_db() -> None:
@@ -90,25 +90,26 @@ def load_to_db() -> None:
         except Exception as e:  # 한 도메인이 죽어도 나머지는 적재한다
             fails += 1
             print(f"[실패] {name}: {e}")
+    # 콘솔이 CP949 라 em-dash 같은 문자에서 UnicodeEncodeError 가 난다 (적재는 이미 끝난 뒤라 더 아깝다)
     if fails:
-        print(f"\n적재 완료 — 실패 {fails}건 (위 로그 확인)")
+        print(f"\n적재 완료 - 실패 {fails}건 (위 로그 확인)")
     else:
-        print("\n적재 완료 — 전 도메인 성공")
+        print("\n적재 완료 - 전 도메인 성공")
 
 
 def main() -> None:
     if not BUCKET:
-        sys.exit("SMARTPORT_S3_BUCKET 이 .env 에 없습니다 — aws/설치가이드.md 6단계 참조")
+        sys.exit("SMARTPORT_S3_BUCKET 이 .env 에 없습니다 - aws/설치가이드.md 6단계 참조")
     import boto3
 
     s3 = boto3.client("s3", region_name=REGION)
     print(f"S3 버킷: {BUCKET}")
     collector_health(s3)
-    print("다운로드 중…")
+    print("다운로드 중...")
     n = download(s3)
     print(f"  {n}개 파일 수신")
     if n == 0:
-        sys.exit("받은 파일이 없습니다 — EC2 수집기가 돌았는지 확인 (aws/설치가이드.md 8단계)")
+        sys.exit("받은 파일이 없습니다 - EC2 수집기가 돌았는지 확인 (aws/설치가이드.md 8단계)")
     load_to_db()
 
 

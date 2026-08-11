@@ -734,9 +734,22 @@ SELECT
     t.current_speed_cms,
     t.current_dir_deg
 FROM (SELECT 1) AS anchor
-LEFT JOIN (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
-LEFT JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
-LEFT JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
+-- "가장 최근 행" 이 아니라 "그 지표가 실제로 관측된 가장 최근 행" 을 쓴다.
+--
+-- 원천(MMAF openWeatherNow, 울산항동방파제서단등대)이 관측값 없이 시각만 있는 행을
+-- 계속 보낼 때가 있다. 2026-08-11 실측: 최근 167행 중 풍속이 있는 행은 20건뿐이고
+-- 08-10 12:40 이후로는 전부 비어 있었다. 최신 행만 집으면 풍속이 NULL 이 되고,
+-- 화면(mock-server)은 그걸 "실데이터 없음" 으로 보고 mock 기상으로 넘어간다 —
+-- 즉 실관측이 있는데도 대시보드가 가짜 기상을 띄우게 된다.
+--
+-- 값이 오래됐다는 사실 자체는 숨기지 않는다: 각 observed_at_utc 가 그 값이 실제로
+-- 측정된 시각이므로, 화면은 그걸로 신선도(is_stale)를 그대로 판단할 수 있다.
+LEFT JOIN (SELECT * FROM weather_obs WHERE wind_speed_ms IS NOT NULL
+           ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
+LEFT JOIN (SELECT * FROM tide_obs WHERE tide_level_cm IS NOT NULL
+           ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
+LEFT JOIN (SELECT * FROM wave_obs WHERE wave_height_sig_m IS NOT NULL
+           ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
 
 -- ---------------------------------------------------------------------------
 -- 5-1. mart.berth_draught_check — 조위 반영 가용수심 · UKC 판정
