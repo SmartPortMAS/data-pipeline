@@ -102,6 +102,9 @@ CREATE SCHEMA IF NOT EXISTS mart;
 -- ★ 삭제 순서 = 생성 역순 (의존하는 쪽을 먼저 지운다)
 -- ---------------------------------------------------------------------------
 DROP VIEW IF EXISTS mart.berth_current_cargo;
+DROP MATERIALIZED VIEW IF EXISTS mart.facility_alias;
+DROP FUNCTION IF EXISTS mart.norm_berth(text);
+DROP FUNCTION IF EXISTS mart.norm_facility(text);
 DROP VIEW IF EXISTS mart.pipeline_health;
 DROP VIEW IF EXISTS mart.dashboard_current;
 DROP VIEW IF EXISTS mart.berth_draught_check;
@@ -179,6 +182,151 @@ CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
     quality_flag                 text,
     is_synthetic                 boolean
 );
+
+-- ---------------------------------------------------------------------------
+-- 0-B. mart.facility_alias — 시설명 정규화 매핑 (P1 처방)
+--
+-- ★ 문제 — 실측(2026-08-11, upa_port_call 재수집 후)
+--   VTS 운항관제(upa_port_call.facility_name) 113종 vs 선석 제원 마스터
+--   (Neo4j Berth.wharf_name) 68종이 서로 다른 표기 체계다.
+--   'S-OIL1부두'(VTS) vs 'S-Oil 1부두'(마스터), 'OTK부두' vs 'OTK1부두' 등.
+--   문자열 완전일치로 조인하면(현재 backend dashboard.py 방식) 선석 점유
+--   판정이 대부분 "여유"로 오표시된다(운항 기록 92%가 마스터와 안 붙음).
+--
+-- ★ 정규화만으로 해결되는 범위 — 두 함수로 66%(113종 중 75종) 자동 일치
+--   norm_facility(): 괄호 안 부가정보 제거('용연부두(1선석)' → '용연부두')
+--                     + 공백 제거 + 소문자화('S-OIL1부두'·'S-Oil 1부두' 동일화)
+--   norm_berth():     위 + 끝자리 접미 선석번호 제거('SK2부두 01' → 'SK2부두')
+--                      단, '정박지'는 예외 — 번호 자체가 정박지 식별자라서
+--                      제거하면 '정박지 01'과 '04'가 뭉개진다.
+--
+-- ★ 정규화로 안 풀리는 39종 — 세 갈래로 분류(억지로 맞추지 않는다)
+--   (a) 수동 별칭 12건 — 표기가 다를 뿐 같은 시설임을 확인한 것만
+--       (OTK부두→OTK1부두는 확신도 낮음 — OTK1/2 중 하나로 통계상 추정.
+--        운영 확인 전까지 참고용으로만 쓸 것)
+--   (b) OTHER 14종 — 호안·물양장·의장안벽 등. 선석 제원 마스터에 원래 없는
+--       시설이 정상이다(장생포호안 등은 접안 시설이 아니라 계류/작업 공간).
+--       억지로 매핑하면 존재하지 않는 선석 점유를 만들어낸다.
+--   (c) UNMAPPED 13종 — '정박지 01'~'07'은 Neo4j Anchorage(B1-1~W1 20종)의
+--       어느 코드와 대응하는지 근거 자료가 없다(E1/E2/E3만 기존에 확인됨).
+--       '현대오일터미널신항부두'도 마스터의 '신항1부두'/'신항2부두' 중 어느
+--       쪽인지 표기만으로 판별 불가. 모르는 걸 안다고 하지 않는다 —
+--       berth_draught_check의 UNKNOWN과 같은 원칙.
+--
+-- ★ 구체화(MATERIALIZED)하는 이유: upa_port_call 20,000+행을 매번 훑어
+--   DISTINCT 를 뽑는 대신, 수집 시점에만 바뀌는 이 157종(실측 시점 기준)
+--   사전을 한 번 구체화해 두고 조회는 상수 시간으로 만든다. dashboard_current
+--   등 다른 뷰와 같은 이유(4-2절 성능 실측과 동일 원칙).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION mart.norm_facility(text) RETURNS text AS $$
+    SELECT lower(regexp_replace(regexp_replace($1, '\(.*\)', '', 'g'), '\s+', '', 'g'));
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION mart.norm_berth(text) RETURNS text AS $$
+    SELECT CASE
+        WHEN $1 ~ '^정박지' THEN mart.norm_facility($1)
+        ELSE regexp_replace(mart.norm_facility($1), '[0-9]+$', '')
+    END;
+$$ LANGUAGE sql IMMUTABLE;
+
+-- ★ 2026-08-11 개정 — 마스터를 upa_berth_facility로 교체
+--   초판은 Neo4j Berth.wharf_name 목록을 이 파일에 VALUES로 손으로 옮겨 적어
+--   대조했다. 문제는 Neo4j가 그 목록의 정본이 아니라는 것 — berth_neo4j_loader.py가
+--   Neo4j Berth.wharf_name을 upa_berth_facility.wharf_name에서 그대로(가공 없이)
+--   가져온다("wharf_name은 upa_berth_facility_stg.csv 실제 값과 정확히 일치해야
+--   한다", 로더 주석). 즉 upa_berth_facility가 정본이고 Neo4j는 그 파생물이다.
+--   여기서 손으로 옮긴 목록을 쓰면 (a) 정본이 둘로 갈라지고 (b) 선석이 추가·
+--   개명돼도 이 파일을 다시 고쳐야 한다. Postgres 안에서 정본을 직접 참조하면
+--   그 문제가 사라지고, 부수 효과로 facility_type='BERTH' 판정도 "실제 마스터에
+--   있는지"로 검증된다(초판은 나머지 전부를 BERTH로 기본 처리해서, 규칙이
+--   틀리게 붙여도 걸러낼 방법이 없었다).
+CREATE MATERIALIZED VIEW mart.facility_alias AS
+WITH master AS (
+    -- 선석 제원 마스터(정본) — Neo4j Berth는 이 테이블의 파생물이다(위 설명 참고).
+    SELECT DISTINCT wharf_name, mart.norm_berth(wharf_name) AS berth_key
+    FROM upa_berth_facility
+    WHERE wharf_name IS NOT NULL AND btrim(wharf_name) <> ''
+),
+manual_alias AS (
+    -- 표기만 다를 뿐 같은 시설임을 확인한 것만. 새로 발견되면 여기 추가할 것 —
+    -- 정규화 규칙을 늘리지 말 것(규칙을 늘리면 위 두 함수가 다른 시설까지
+    -- 잘못 묶기 시작한다. 예외는 사전으로 관리하는 게 안전하다).
+    -- target_name은 master.wharf_name과 정확히 일치해야 한다 — 안 맞으면
+    -- 아래 조인에서 걸러져 UNMAPPED로 떨어진다(오탈자 방지 자체검증).
+    SELECT * FROM (VALUES
+        ('OTK부두',                'OTK1부두',        'BERTH'),
+        ('엘에스니꼬신항부두',      'LS MNM 신항부두', 'BERTH'),
+        ('신항컨테이너부두01',      '신항컨부두',       'BERTH'),
+        ('신항컨테이너부두02',      '신항컨부두',       'BERTH'),
+        ('신항컨테이너부두03',      '신항컨부두',       'BERTH'),
+        ('신항컨테이너부두04',      '신항컨부두',       'BERTH'),
+        ('용잠부두 01',            '용잠1부두',        'BERTH'),
+        ('용잠부두 02',            '용잠2부두',        'BERTH'),
+        ('SK부이 02',              'SK2부이',          'BERTH'),
+        ('SK부이 03',              'SK3부이',          'BERTH'),
+        ('정박지-E1',              'E1',               'ANCHORAGE'),
+        ('정박지-E2',              'E2',               'ANCHORAGE'),
+        ('정박지-E3',              'E3',               'ANCHORAGE')
+    ) AS t(source_name, target_name, facility_type)
+),
+other_facility AS (
+    -- 선석 제원 마스터에 원래 없는 시설 — 호안·물양장·의장안벽 등.
+    SELECT unnest(ARRAY[
+        '장생포호안', '이진물양장', '현중해양의장안벽',
+        '현대미포의장안벽01', '현대미포의장안벽02', '현대미포의장안벽03',
+        '현대미포의장안벽04', '현대미포의장안벽05',
+        '우봉물양장', '신항부두작업장', '유화1부두', '세방신항부두',
+        '매암부두', 'S-OIL 2부이'
+    ]) AS source_name
+),
+source_names AS (
+    -- upa_port_call(VTS 원문) + upa_cargo_manifest(합성 화물의 자체 표기) 합집합.
+    -- 둘이 서로 다른 어휘를 쓴다 — berth_current_cargo.facility_name은
+    -- COALESCE(cm.facility_name, ip.facility_name)라(뷰 8번 정의) 화물이 매칭된
+    -- 행은 합성 manifest 표기('S-Oil 1부두', 이미 정돈된 형태)로 나오고 화물이
+    -- 없는 행만 VTS 원문('S-OIL1부두')으로 나온다. 이 사전이 한쪽만 알면
+    -- berth_current_cargo를 조인하는 소비자(scheduling/service.py)가 매번
+    -- 이중 정규화 폴백을 따로 구현해야 한다 — 실제로 그 사고가 났었다.
+    SELECT DISTINCT facility_name AS source_name
+    FROM upa_port_call
+    WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+    UNION
+    SELECT DISTINCT facility_name
+    FROM upa_cargo_manifest
+    WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+),
+matched AS (
+    SELECT
+        s.source_name,
+        ma.facility_type          AS manual_type,
+        mb.wharf_name             AS manual_wharf_name,   -- 수동 별칭이 실제 마스터에 있는지 검증됨
+        ma.target_name            AS anchorage_key,        -- ANCHORAGE면 Neo4j Anchorage.id
+        o.source_name IS NOT NULL AS is_other,
+        m.wharf_name              AS auto_wharf_name       -- 정규화 규칙으로 마스터와 자동 매칭된 것
+    FROM source_names s
+    LEFT JOIN manual_alias ma ON ma.source_name = s.source_name
+    LEFT JOIN master mb       ON mb.wharf_name = ma.target_name AND ma.facility_type = 'BERTH'
+    LEFT JOIN other_facility o ON o.source_name = s.source_name
+    LEFT JOIN master m        ON m.berth_key = mart.norm_berth(s.source_name)
+)
+SELECT
+    source_name,
+    -- wharf_name: 선석 제원 마스터의 정본 표기. 이제 backend가 Neo4j에서 wharf_name
+    -- 목록을 매 요청마다 다시 넘길 필요가 없다 — 이 값이 이미 Neo4j Berth.wharf_name과
+    -- 문자 그대로 같다(둘 다 upa_berth_facility에서 왔으므로).
+    COALESCE(manual_wharf_name, auto_wharf_name)                            AS wharf_name,
+    CASE WHEN manual_type = 'ANCHORAGE' THEN anchorage_key END              AS anchorage_key,
+    CASE
+        WHEN manual_type = 'ANCHORAGE'                    THEN 'ANCHORAGE'
+        WHEN manual_type = 'BERTH' AND manual_wharf_name IS NOT NULL THEN 'BERTH'
+        WHEN manual_type = 'BERTH'                        THEN 'UNMAPPED'  -- 별칭 오탈자 등 자체검증 실패
+        WHEN is_other                                     THEN 'OTHER'
+        WHEN auto_wharf_name IS NOT NULL                  THEN 'BERTH'
+        ELSE 'UNMAPPED'  -- 정박지 01~07, 현대오일터미널신항부두(신항1/2 판별 불가) 등
+    END                                                                     AS facility_type
+FROM matched;
+
+CREATE UNIQUE INDEX idx_facility_alias_source ON mart.facility_alias (source_name);
 
 -- ---------------------------------------------------------------------------
 -- 1. mart.vessel_identity — 선박 식별 마스터 (1척 = 1행)

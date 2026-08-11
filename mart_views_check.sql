@@ -231,6 +231,33 @@ SELECT '12. 수집기 생존 신호' AS check_name,
        END AS result
 FROM mart.pipeline_health;
 
+-- [검증 13] facility_alias — 커버리지(원천 시설명 전부 사전에 등록됐는가)
+--   새 시설명이 나타나도 뷰 재적용 전까지는 facility_alias 에 없을 수 있다.
+--   그 시설은 berth_key/anchorage_key 매칭에서 조용히 빠지므로, 커버리지
+--   자체가 100% 인지(사전 등록 누락 여부)와 BERTH 비율(P1 실효성)을 함께 본다.
+SELECT '13. facility_alias 커버리지' AS check_name,
+       CASE WHEN uncovered > 0
+              THEN 'FAIL (원천에만 있고 사전에 없는 시설명 ' || uncovered || '종 — mart_views.sql 재적용 필요)'
+            ELSE 'PASS (' || total || '종 전부 사전 등록, BERTH ' || berth_n
+                 || '종/' || round(100.0 * berth_calls / NULLIF(total_calls, 0), 1)
+                 || '% 운항건, UNMAPPED ' || unmapped_n || '종)'
+       END AS result
+FROM (
+    SELECT
+        (SELECT count(*) FROM mart.facility_alias)                                   AS total,
+        (SELECT count(*) FROM mart.facility_alias WHERE facility_type = 'BERTH')     AS berth_n,
+        (SELECT count(*) FROM mart.facility_alias WHERE facility_type = 'UNMAPPED')  AS unmapped_n,
+        (SELECT count(*) FROM (
+             SELECT DISTINCT facility_name FROM upa_port_call
+             WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+               AND facility_name NOT IN (SELECT source_name FROM mart.facility_alias)
+         ) t)                                                                        AS uncovered,
+        (SELECT count(*) FROM upa_port_call pc JOIN mart.facility_alias fa
+             ON fa.source_name = pc.facility_name)                                   AS total_calls,
+        (SELECT count(*) FROM upa_port_call pc JOIN mart.facility_alias fa
+             ON fa.source_name = pc.facility_name WHERE fa.facility_type = 'BERTH')   AS berth_calls
+) t;
+
 -- ---------------------------------------------------------------------------
 -- [참고 A] presence_state 임계값 실측 근거 산출 쿼리
 --
