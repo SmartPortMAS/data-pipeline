@@ -184,6 +184,52 @@ CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
 );
 
 -- ---------------------------------------------------------------------------
+-- 0-A2. upa_berth_facility — 선석 제원 마스터 (facility_alias 가 정본으로 참조)
+--
+-- ★ 왜 여기 껍데기가 필요한가 (2026-08-12 실측 확인)
+--   이 테이블은 UPA 부두현황 API(getGisBaseHrbrFcltDtlInfo)로 채워지는데,
+--   그 수집은 run_pipeline.DOMAINS 8종(tide/wave/weather/weather_forecast/
+--   vessel/port_call/portmis/mart)에 **들어 있지 않다** — collect_berth_facility()
+--   를 따로 호출해야 생긴다.
+--
+--   그래서 표준 순서(alembic upgrade head → run_pipeline all → psql -f
+--   mart_views.sql)를 그대로 따르면 이 테이블이 없고, 아래 mart.facility_alias 의
+--   CREATE MATERIALIZED VIEW 가 참조 테이블 부재로 실패한다. PostgreSQL 은 뷰
+--   생성 시점에 참조 테이블 "존재"를 검사하므로, 파일 앞쪽에서 죽으면
+--   **뒤따르는 뷰 10종이 하나도 안 만들어진다**. 실측 재현:
+--       ERROR: relation "upa_berth_facility" does not exist   → mart 뷰 0개
+--
+--   바로 위 upa_cargo_manifest 껍데기와 정확히 같은 이유·같은 처방이다.
+--   실데이터가 이미 적재돼 있으면 이 구문은 아무 일도 하지 않는다.
+--
+--   ※ 껍데기만 있는 상태에서는 facility_alias 의 master CTE 가 0행이 되어 자동
+--     매칭이 전부 UNMAPPED 로 떨어진다. 그건 "부두 제원을 아직 안 받았다"는
+--     사실의 정확한 반영이지 조용한 오작동이 아니다 — 검증 13 이 그 상태를
+--     드러낸다. 선석 매칭을 실제로 쓰려면 collect_berth_facility() 를 한 번
+--     돌려야 한다.
+--
+-- 컬럼 구성은 upa_config.HRBR_FCLT_INFO.column_map 과 1:1 (적재 시 스키마 불일치 방지).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS upa_berth_facility (
+    port_name            text,
+    wharf_name           text,          -- ★ facility_alias 매칭의 정본 컬럼
+    length_m             double precision,
+    depth_m              double precision,
+    berth_capacity       double precision,
+    berth_vessel_count   double precision,
+    unload_capacity      double precision,
+    handling_cargo_name  text,
+    wharf_se_name        text,
+    latitude             double precision,
+    longitude            double precision,
+    port_operator_name   text,
+    source_system        text,
+    source_table         text,
+    collected_at_utc     timestamptz,
+    quality_flag         text
+);
+
+-- ---------------------------------------------------------------------------
 -- 0-B. mart.facility_alias — 시설명 정규화 매핑 (P1 처방)
 --
 -- ★ 문제 — 실측(2026-08-11, upa_port_call 재수집 후)
