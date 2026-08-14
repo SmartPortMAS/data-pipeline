@@ -902,15 +902,54 @@ LEFT JOIN mart.msds_flat ms
 --    한 테이블만 비어도 대시보드 환경 컬럼 전체가 사라진다).
 --    울산 단일 관측 지점 전제 — 다지점 수집으로 바뀌면 station_id 필터 추가.
 -- ---------------------------------------------------------------------------
+--
+-- [2026-08-15 개정] "가장 최근 행"이 아니라 "그 지표가 실제로 관측된 가장 최근 행"
+--
+--   항만기상(MMAF openWeatherNow · 울산항동방파제서단등대)은 관측값 칸이 빈 행을
+--   시각만 채워 매시간 보낸다. 실측: 최근 8일 중 하루 24행 가운데 풍속이 들어있는
+--   행은 0~6건뿐이었다. 최신 행 하나만 집으면 wind_speed_ms 가 NULL 이 되고,
+--   소비하는 쪽은 그걸 "실데이터 없음"으로 보고 mock 기상으로 넘어간다 —
+--   실관측이 있는데도 대시보드가 가짜 기상을 띄우게 된다.
+--
+--   풍속은 한 소스만 보지 않는다. 조위관측소(KHOA)와 부이(KMA)도 풍속을 함께
+--   보내고, 실측상 이쪽이 훨씬 촘촘하다 (조위 1,803행 전부 / 부이 250행 전부 /
+--   항만기상 248행 중 33건). 세 소스를 합쳐 그중 가장 최근 관측을 쓴다.
+--   기상 판정(하역중단 등)은 풍속 신선도에 직접 걸리므로 이 차이가 곧 판정 가부다.
+--
+--   값이 오래됐다는 사실은 숨기지 않는다 — weather_observed_at_utc 가 그 풍속이
+--   실제로 측정된 시각이라 소비하는 쪽이 신선도를 그대로 판단할 수 있다.
+--   어느 관측소에서 온 값인지도 wind_source/wind_station_name 으로 드러낸다.
+--
 CREATE OR REPLACE VIEW mart.weather_now AS
+WITH wind_all AS (
+    -- 항만기상에는 돌풍 컬럼이 스키마상 없다 (결측이 아니라 미제공)
+    SELECT observed_at_utc, wind_speed_ms, wind_dir_deg,
+           NULL::double precision AS gust_ms,
+           station_name, 'MMAF_PORT'::text AS wind_source
+      FROM weather_obs WHERE wind_speed_ms IS NOT NULL
+    UNION ALL
+    SELECT observed_at_utc, wind_speed_ms, wind_dir_deg, gust_ms,
+           station_name, 'KHOA_TIDE'
+      FROM tide_obs WHERE wind_speed_ms IS NOT NULL
+    UNION ALL
+    -- 부이는 풍향·풍속 센서가 2조다 (1번이 주센서, 2번은 예비)
+    SELECT observed_at_utc, wind_speed1_ms, wind_dir1_deg, gust1_ms,
+           station_name, 'KMA_BUOY'
+      FROM wave_obs WHERE wind_speed1_ms IS NOT NULL
+),
+w   AS (SELECT * FROM wind_all ORDER BY observed_at_utc DESC LIMIT 1),
+wa  AS (SELECT * FROM weather_obs WHERE air_temp_c        IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+wvi AS (SELECT * FROM weather_obs WHERE visibility_m      IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+t   AS (SELECT * FROM tide_obs    WHERE tide_level_cm     IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+v   AS (SELECT * FROM wave_obs    WHERE wave_height_sig_m IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1)
 SELECT
     w.observed_at_utc      AS weather_observed_at_utc,
     w.wind_dir_deg,
     w.wind_speed_ms,
-    w.air_temp_c,
-    w.humidity_pct,
-    w.air_pressure_hpa,
-    w.visibility_m,
+    wa.air_temp_c,
+    wa.humidity_pct,
+    wa.air_pressure_hpa,
+    wvi.visibility_m,
     t.observed_at_utc      AS tide_observed_at_utc,
     t.tide_level_cm,
     t.sea_temp_c,
@@ -922,15 +961,21 @@ SELECT
     v.wave_dir_deg,
     -- ↓ 실무 반영 추가 (CREATE OR REPLACE 제약상 맨 뒤에 붙인다)
     --   돌풍(gust): 계류삭 장력은 평균풍속이 아니라 순간최대풍속에 끊어진다.
+    --     풍속과 같은 관측에서 온 값이어야 짝이 맞으므로 풍속 소스에서 함께 가져온다.
     --   조류(current): 액체부두 접·이안에서 조류는 풍속만큼 중요한 제약이다.
     --     특히 울산 본항·온산 수로는 창·낙조류 방향이 접안 조종에 직접 영향.
-    t.gust_ms,
+    w.gust_ms,
     t.current_speed_cms,
-    t.current_dir_deg
+    t.current_dir_deg,
+    -- 풍속 출처 (맨 뒤 추가) — 관제사·리뷰어가 "어느 관측소 값인가"를 알 수 있어야 한다
+    w.wind_source,
+    w.station_name         AS wind_station_name
 FROM (SELECT 1) AS anchor
-LEFT JOIN (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
-LEFT JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
-LEFT JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
+LEFT JOIN w   ON TRUE
+LEFT JOIN wa  ON TRUE
+LEFT JOIN wvi ON TRUE
+LEFT JOIN t   ON TRUE
+LEFT JOIN v   ON TRUE;
 
 -- ---------------------------------------------------------------------------
 -- 5-1. mart.berth_draught_check — 조위 반영 가용수심 · UKC 판정
