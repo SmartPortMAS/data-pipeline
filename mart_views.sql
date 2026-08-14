@@ -102,6 +102,9 @@ CREATE SCHEMA IF NOT EXISTS mart;
 -- ★ 삭제 순서 = 생성 역순 (의존하는 쪽을 먼저 지운다)
 -- ---------------------------------------------------------------------------
 DROP VIEW IF EXISTS mart.berth_current_cargo;
+DROP MATERIALIZED VIEW IF EXISTS mart.facility_alias;
+DROP FUNCTION IF EXISTS mart.norm_berth(text);
+DROP FUNCTION IF EXISTS mart.norm_facility(text);
 DROP VIEW IF EXISTS mart.pipeline_health;
 DROP VIEW IF EXISTS mart.dashboard_current;
 DROP VIEW IF EXISTS mart.berth_draught_check;
@@ -179,6 +182,197 @@ CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
     quality_flag                 text,
     is_synthetic                 boolean
 );
+
+-- ---------------------------------------------------------------------------
+-- 0-A2. upa_berth_facility — 선석 제원 마스터 (facility_alias 가 정본으로 참조)
+--
+-- ★ 왜 여기 껍데기가 필요한가 (2026-08-12 실측 확인)
+--   이 테이블은 UPA 부두현황 API(getGisBaseHrbrFcltDtlInfo)로 채워지는데,
+--   그 수집은 run_pipeline.DOMAINS 8종(tide/wave/weather/weather_forecast/
+--   vessel/port_call/portmis/mart)에 **들어 있지 않다** — collect_berth_facility()
+--   를 따로 호출해야 생긴다.
+--
+--   그래서 표준 순서(alembic upgrade head → run_pipeline all → psql -f
+--   mart_views.sql)를 그대로 따르면 이 테이블이 없고, 아래 mart.facility_alias 의
+--   CREATE MATERIALIZED VIEW 가 참조 테이블 부재로 실패한다. PostgreSQL 은 뷰
+--   생성 시점에 참조 테이블 "존재"를 검사하므로, 파일 앞쪽에서 죽으면
+--   **뒤따르는 뷰 10종이 하나도 안 만들어진다**. 실측 재현:
+--       ERROR: relation "upa_berth_facility" does not exist   → mart 뷰 0개
+--
+--   바로 위 upa_cargo_manifest 껍데기와 정확히 같은 이유·같은 처방이다.
+--   실데이터가 이미 적재돼 있으면 이 구문은 아무 일도 하지 않는다.
+--
+--   ※ 껍데기만 있는 상태에서는 facility_alias 의 master CTE 가 0행이 되어 자동
+--     매칭이 전부 UNMAPPED 로 떨어진다. 그건 "부두 제원을 아직 안 받았다"는
+--     사실의 정확한 반영이지 조용한 오작동이 아니다 — 검증 13 이 그 상태를
+--     드러낸다. 선석 매칭을 실제로 쓰려면 collect_berth_facility() 를 한 번
+--     돌려야 한다.
+--
+-- 컬럼 구성은 upa_config.HRBR_FCLT_INFO.column_map 과 1:1 (적재 시 스키마 불일치 방지).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS upa_berth_facility (
+    port_name            text,
+    wharf_name           text,          -- ★ facility_alias 매칭의 정본 컬럼
+    length_m             double precision,
+    depth_m              double precision,
+    berth_capacity       double precision,
+    berth_vessel_count   double precision,
+    unload_capacity      double precision,
+    handling_cargo_name  text,
+    wharf_se_name        text,
+    latitude             double precision,
+    longitude            double precision,
+    port_operator_name   text,
+    source_system        text,
+    source_table         text,
+    collected_at_utc     timestamptz,
+    quality_flag         text
+);
+
+-- ---------------------------------------------------------------------------
+-- 0-B. mart.facility_alias — 시설명 정규화 매핑 (P1 처방)
+--
+-- ★ 문제 — 실측(2026-08-11, upa_port_call 재수집 후)
+--   VTS 운항관제(upa_port_call.facility_name) 113종 vs 선석 제원 마스터
+--   (Neo4j Berth.wharf_name) 68종이 서로 다른 표기 체계다.
+--   'S-OIL1부두'(VTS) vs 'S-Oil 1부두'(마스터), 'OTK부두' vs 'OTK1부두' 등.
+--   문자열 완전일치로 조인하면(현재 backend dashboard.py 방식) 선석 점유
+--   판정이 대부분 "여유"로 오표시된다(운항 기록 92%가 마스터와 안 붙음).
+--
+-- ★ 정규화만으로 해결되는 범위 — 두 함수로 66%(113종 중 75종) 자동 일치
+--   norm_facility(): 괄호 안 부가정보 제거('용연부두(1선석)' → '용연부두')
+--                     + 공백 제거 + 소문자화('S-OIL1부두'·'S-Oil 1부두' 동일화)
+--   norm_berth():     위 + 끝자리 접미 선석번호 제거('SK2부두 01' → 'SK2부두')
+--                      단, '정박지'는 예외 — 번호 자체가 정박지 식별자라서
+--                      제거하면 '정박지 01'과 '04'가 뭉개진다.
+--
+-- ★ 정규화로 안 풀리는 39종 — 세 갈래로 분류(억지로 맞추지 않는다)
+--   (a) 수동 별칭 12건 — 표기가 다를 뿐 같은 시설임을 확인한 것만
+--       (OTK부두→OTK1부두는 확신도 낮음 — OTK1/2 중 하나로 통계상 추정.
+--        운영 확인 전까지 참고용으로만 쓸 것)
+--   (b) OTHER 14종 — 호안·물양장·의장안벽 등. 선석 제원 마스터에 원래 없는
+--       시설이 정상이다(장생포호안 등은 접안 시설이 아니라 계류/작업 공간).
+--       억지로 매핑하면 존재하지 않는 선석 점유를 만들어낸다.
+--   (c) UNMAPPED 13종 — '정박지 01'~'07'은 Neo4j Anchorage(B1-1~W1 20종)의
+--       어느 코드와 대응하는지 근거 자료가 없다(E1/E2/E3만 기존에 확인됨).
+--       '현대오일터미널신항부두'도 마스터의 '신항1부두'/'신항2부두' 중 어느
+--       쪽인지 표기만으로 판별 불가. 모르는 걸 안다고 하지 않는다 —
+--       berth_draught_check의 UNKNOWN과 같은 원칙.
+--
+-- ★ 구체화(MATERIALIZED)하는 이유: upa_port_call 20,000+행을 매번 훑어
+--   DISTINCT 를 뽑는 대신, 수집 시점에만 바뀌는 이 157종(실측 시점 기준)
+--   사전을 한 번 구체화해 두고 조회는 상수 시간으로 만든다. dashboard_current
+--   등 다른 뷰와 같은 이유(4-2절 성능 실측과 동일 원칙).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION mart.norm_facility(text) RETURNS text AS $$
+    SELECT lower(regexp_replace(regexp_replace($1, '\(.*\)', '', 'g'), '\s+', '', 'g'));
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION mart.norm_berth(text) RETURNS text AS $$
+    SELECT CASE
+        WHEN $1 ~ '^정박지' THEN mart.norm_facility($1)
+        ELSE regexp_replace(mart.norm_facility($1), '[0-9]+$', '')
+    END;
+$$ LANGUAGE sql IMMUTABLE;
+
+-- ★ 2026-08-11 개정 — 마스터를 upa_berth_facility로 교체
+--   초판은 Neo4j Berth.wharf_name 목록을 이 파일에 VALUES로 손으로 옮겨 적어
+--   대조했다. 문제는 Neo4j가 그 목록의 정본이 아니라는 것 — berth_neo4j_loader.py가
+--   Neo4j Berth.wharf_name을 upa_berth_facility.wharf_name에서 그대로(가공 없이)
+--   가져온다("wharf_name은 upa_berth_facility_stg.csv 실제 값과 정확히 일치해야
+--   한다", 로더 주석). 즉 upa_berth_facility가 정본이고 Neo4j는 그 파생물이다.
+--   여기서 손으로 옮긴 목록을 쓰면 (a) 정본이 둘로 갈라지고 (b) 선석이 추가·
+--   개명돼도 이 파일을 다시 고쳐야 한다. Postgres 안에서 정본을 직접 참조하면
+--   그 문제가 사라지고, 부수 효과로 facility_type='BERTH' 판정도 "실제 마스터에
+--   있는지"로 검증된다(초판은 나머지 전부를 BERTH로 기본 처리해서, 규칙이
+--   틀리게 붙여도 걸러낼 방법이 없었다).
+CREATE MATERIALIZED VIEW mart.facility_alias AS
+WITH master AS (
+    -- 선석 제원 마스터(정본) — Neo4j Berth는 이 테이블의 파생물이다(위 설명 참고).
+    SELECT DISTINCT wharf_name, mart.norm_berth(wharf_name) AS berth_key
+    FROM upa_berth_facility
+    WHERE wharf_name IS NOT NULL AND btrim(wharf_name) <> ''
+),
+manual_alias AS (
+    -- 표기만 다를 뿐 같은 시설임을 확인한 것만. 새로 발견되면 여기 추가할 것 —
+    -- 정규화 규칙을 늘리지 말 것(규칙을 늘리면 위 두 함수가 다른 시설까지
+    -- 잘못 묶기 시작한다. 예외는 사전으로 관리하는 게 안전하다).
+    -- target_name은 master.wharf_name과 정확히 일치해야 한다 — 안 맞으면
+    -- 아래 조인에서 걸러져 UNMAPPED로 떨어진다(오탈자 방지 자체검증).
+    SELECT * FROM (VALUES
+        ('OTK부두',                'OTK1부두',        'BERTH'),
+        ('엘에스니꼬신항부두',      'LS MNM 신항부두', 'BERTH'),
+        ('신항컨테이너부두01',      '신항컨부두',       'BERTH'),
+        ('신항컨테이너부두02',      '신항컨부두',       'BERTH'),
+        ('신항컨테이너부두03',      '신항컨부두',       'BERTH'),
+        ('신항컨테이너부두04',      '신항컨부두',       'BERTH'),
+        ('용잠부두 01',            '용잠1부두',        'BERTH'),
+        ('용잠부두 02',            '용잠2부두',        'BERTH'),
+        ('SK부이 02',              'SK2부이',          'BERTH'),
+        ('SK부이 03',              'SK3부이',          'BERTH'),
+        ('정박지-E1',              'E1',               'ANCHORAGE'),
+        ('정박지-E2',              'E2',               'ANCHORAGE'),
+        ('정박지-E3',              'E3',               'ANCHORAGE')
+    ) AS t(source_name, target_name, facility_type)
+),
+other_facility AS (
+    -- 선석 제원 마스터에 원래 없는 시설 — 호안·물양장·의장안벽 등.
+    SELECT unnest(ARRAY[
+        '장생포호안', '이진물양장', '현중해양의장안벽',
+        '현대미포의장안벽01', '현대미포의장안벽02', '현대미포의장안벽03',
+        '현대미포의장안벽04', '현대미포의장안벽05',
+        '우봉물양장', '신항부두작업장', '유화1부두', '세방신항부두',
+        '매암부두', 'S-OIL 2부이'
+    ]) AS source_name
+),
+source_names AS (
+    -- upa_port_call(VTS 원문) + upa_cargo_manifest(합성 화물의 자체 표기) 합집합.
+    -- 둘이 서로 다른 어휘를 쓴다 — berth_current_cargo.facility_name은
+    -- COALESCE(cm.facility_name, ip.facility_name)라(뷰 8번 정의) 화물이 매칭된
+    -- 행은 합성 manifest 표기('S-Oil 1부두', 이미 정돈된 형태)로 나오고 화물이
+    -- 없는 행만 VTS 원문('S-OIL1부두')으로 나온다. 이 사전이 한쪽만 알면
+    -- berth_current_cargo를 조인하는 소비자(scheduling/service.py)가 매번
+    -- 이중 정규화 폴백을 따로 구현해야 한다 — 실제로 그 사고가 났었다.
+    SELECT DISTINCT facility_name AS source_name
+    FROM upa_port_call
+    WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+    UNION
+    SELECT DISTINCT facility_name
+    FROM upa_cargo_manifest
+    WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+),
+matched AS (
+    SELECT
+        s.source_name,
+        ma.facility_type          AS manual_type,
+        mb.wharf_name             AS manual_wharf_name,   -- 수동 별칭이 실제 마스터에 있는지 검증됨
+        ma.target_name            AS anchorage_key,        -- ANCHORAGE면 Neo4j Anchorage.id
+        o.source_name IS NOT NULL AS is_other,
+        m.wharf_name              AS auto_wharf_name       -- 정규화 규칙으로 마스터와 자동 매칭된 것
+    FROM source_names s
+    LEFT JOIN manual_alias ma ON ma.source_name = s.source_name
+    LEFT JOIN master mb       ON mb.wharf_name = ma.target_name AND ma.facility_type = 'BERTH'
+    LEFT JOIN other_facility o ON o.source_name = s.source_name
+    LEFT JOIN master m        ON m.berth_key = mart.norm_berth(s.source_name)
+)
+SELECT
+    source_name,
+    -- wharf_name: 선석 제원 마스터의 정본 표기. 이제 backend가 Neo4j에서 wharf_name
+    -- 목록을 매 요청마다 다시 넘길 필요가 없다 — 이 값이 이미 Neo4j Berth.wharf_name과
+    -- 문자 그대로 같다(둘 다 upa_berth_facility에서 왔으므로).
+    COALESCE(manual_wharf_name, auto_wharf_name)                            AS wharf_name,
+    CASE WHEN manual_type = 'ANCHORAGE' THEN anchorage_key END              AS anchorage_key,
+    CASE
+        WHEN manual_type = 'ANCHORAGE'                    THEN 'ANCHORAGE'
+        WHEN manual_type = 'BERTH' AND manual_wharf_name IS NOT NULL THEN 'BERTH'
+        WHEN manual_type = 'BERTH'                        THEN 'UNMAPPED'  -- 별칭 오탈자 등 자체검증 실패
+        WHEN is_other                                     THEN 'OTHER'
+        WHEN auto_wharf_name IS NOT NULL                  THEN 'BERTH'
+        ELSE 'UNMAPPED'  -- 정박지 01~07, 현대오일터미널신항부두(신항1/2 판별 불가) 등
+    END                                                                     AS facility_type
+FROM matched;
+
+CREATE UNIQUE INDEX idx_facility_alias_source ON mart.facility_alias (source_name);
 
 -- ---------------------------------------------------------------------------
 -- 1. mart.vessel_identity — 선박 식별 마스터 (1척 = 1행)
@@ -708,15 +902,54 @@ LEFT JOIN mart.msds_flat ms
 --    한 테이블만 비어도 대시보드 환경 컬럼 전체가 사라진다).
 --    울산 단일 관측 지점 전제 — 다지점 수집으로 바뀌면 station_id 필터 추가.
 -- ---------------------------------------------------------------------------
+--
+-- [2026-08-15 개정] "가장 최근 행"이 아니라 "그 지표가 실제로 관측된 가장 최근 행"
+--
+--   항만기상(MMAF openWeatherNow · 울산항동방파제서단등대)은 관측값 칸이 빈 행을
+--   시각만 채워 매시간 보낸다. 실측: 최근 8일 중 하루 24행 가운데 풍속이 들어있는
+--   행은 0~6건뿐이었다. 최신 행 하나만 집으면 wind_speed_ms 가 NULL 이 되고,
+--   소비하는 쪽은 그걸 "실데이터 없음"으로 보고 mock 기상으로 넘어간다 —
+--   실관측이 있는데도 대시보드가 가짜 기상을 띄우게 된다.
+--
+--   풍속은 한 소스만 보지 않는다. 조위관측소(KHOA)와 부이(KMA)도 풍속을 함께
+--   보내고, 실측상 이쪽이 훨씬 촘촘하다 (조위 1,803행 전부 / 부이 250행 전부 /
+--   항만기상 248행 중 33건). 세 소스를 합쳐 그중 가장 최근 관측을 쓴다.
+--   기상 판정(하역중단 등)은 풍속 신선도에 직접 걸리므로 이 차이가 곧 판정 가부다.
+--
+--   값이 오래됐다는 사실은 숨기지 않는다 — weather_observed_at_utc 가 그 풍속이
+--   실제로 측정된 시각이라 소비하는 쪽이 신선도를 그대로 판단할 수 있다.
+--   어느 관측소에서 온 값인지도 wind_source/wind_station_name 으로 드러낸다.
+--
 CREATE OR REPLACE VIEW mart.weather_now AS
+WITH wind_all AS (
+    -- 항만기상에는 돌풍 컬럼이 스키마상 없다 (결측이 아니라 미제공)
+    SELECT observed_at_utc, wind_speed_ms, wind_dir_deg,
+           NULL::double precision AS gust_ms,
+           station_name, 'MMAF_PORT'::text AS wind_source
+      FROM weather_obs WHERE wind_speed_ms IS NOT NULL
+    UNION ALL
+    SELECT observed_at_utc, wind_speed_ms, wind_dir_deg, gust_ms,
+           station_name, 'KHOA_TIDE'
+      FROM tide_obs WHERE wind_speed_ms IS NOT NULL
+    UNION ALL
+    -- 부이는 풍향·풍속 센서가 2조다 (1번이 주센서, 2번은 예비)
+    SELECT observed_at_utc, wind_speed1_ms, wind_dir1_deg, gust1_ms,
+           station_name, 'KMA_BUOY'
+      FROM wave_obs WHERE wind_speed1_ms IS NOT NULL
+),
+w   AS (SELECT * FROM wind_all ORDER BY observed_at_utc DESC LIMIT 1),
+wa  AS (SELECT * FROM weather_obs WHERE air_temp_c        IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+wvi AS (SELECT * FROM weather_obs WHERE visibility_m      IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+t   AS (SELECT * FROM tide_obs    WHERE tide_level_cm     IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+v   AS (SELECT * FROM wave_obs    WHERE wave_height_sig_m IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1)
 SELECT
     w.observed_at_utc      AS weather_observed_at_utc,
     w.wind_dir_deg,
     w.wind_speed_ms,
-    w.air_temp_c,
-    w.humidity_pct,
-    w.air_pressure_hpa,
-    w.visibility_m,
+    wa.air_temp_c,
+    wa.humidity_pct,
+    wa.air_pressure_hpa,
+    wvi.visibility_m,
     t.observed_at_utc      AS tide_observed_at_utc,
     t.tide_level_cm,
     t.sea_temp_c,
@@ -728,15 +961,21 @@ SELECT
     v.wave_dir_deg,
     -- ↓ 실무 반영 추가 (CREATE OR REPLACE 제약상 맨 뒤에 붙인다)
     --   돌풍(gust): 계류삭 장력은 평균풍속이 아니라 순간최대풍속에 끊어진다.
+    --     풍속과 같은 관측에서 온 값이어야 짝이 맞으므로 풍속 소스에서 함께 가져온다.
     --   조류(current): 액체부두 접·이안에서 조류는 풍속만큼 중요한 제약이다.
     --     특히 울산 본항·온산 수로는 창·낙조류 방향이 접안 조종에 직접 영향.
-    t.gust_ms,
+    w.gust_ms,
     t.current_speed_cms,
-    t.current_dir_deg
+    t.current_dir_deg,
+    -- 풍속 출처 (맨 뒤 추가) — 관제사·리뷰어가 "어느 관측소 값인가"를 알 수 있어야 한다
+    w.wind_source,
+    w.station_name         AS wind_station_name
 FROM (SELECT 1) AS anchor
-LEFT JOIN (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
-LEFT JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
-LEFT JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
+LEFT JOIN w   ON TRUE
+LEFT JOIN wa  ON TRUE
+LEFT JOIN wvi ON TRUE
+LEFT JOIN t   ON TRUE
+LEFT JOIN v   ON TRUE;
 
 -- ---------------------------------------------------------------------------
 -- 5-1. mart.berth_draught_check — 조위 반영 가용수심 · UKC 판정

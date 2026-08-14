@@ -65,8 +65,18 @@ FROM (
     SELECT (SELECT count(*) FROM mart.dashboard_current)          AS dash_rows,
            (SELECT count(*) FROM mart.vessel_latest_position)     AS pos_rows,
            (SELECT count(*) FROM mart.weather_now)                AS weather_rows,
+           -- weather_now 는 "가장 최근 행"이 아니라 "풍속이 실제로 관측된 가장 최근
+           -- 행"을 집는다(2026-08-15 개정). 원천이 값 없이 시각만 있는 행을 계속
+           -- 보내기 때문이다. 풍속 소스도 항만기상 하나가 아니라 조위관측소·부이를
+           -- 포함하므로, 기준을 "세 소스에서 풍속이 있는 행의 최신 시각"으로 맞춘다.
            (SELECT weather_observed_at_utc FROM mart.weather_now)
-             = (SELECT max(observed_at_utc) FROM weather_obs)     AS weather_is_latest
+             = (SELECT max(t) FROM (
+                   SELECT max(observed_at_utc) AS t FROM weather_obs WHERE wind_speed_ms IS NOT NULL
+                   UNION ALL
+                   SELECT max(observed_at_utc)      FROM tide_obs    WHERE wind_speed_ms IS NOT NULL
+                   UNION ALL
+                   SELECT max(observed_at_utc)      FROM wave_obs    WHERE wind_speed1_ms IS NOT NULL
+               ) s)                                               AS weather_is_latest
 ) t;
 
 -- [검증 6] MMSI-First — 위치신호가 있는 선박은 callsgn 유무와 무관하게 전부 남는가
@@ -230,6 +240,54 @@ SELECT '12. 수집기 생존 신호' AS check_name,
                  || '분 / 원천경과 ' || source_age_min || '분 — ' || diagnosis || ')'
        END AS result
 FROM mart.pipeline_health;
+
+-- [검증 13] facility_alias — 커버리지(원천 시설명 전부 사전에 등록됐는가)
+--   새 시설명이 나타나도 뷰 재적용 전까지는 facility_alias 에 없을 수 있다.
+--   그 시설은 berth_key/anchorage_key 매칭에서 조용히 빠지므로, 커버리지
+--   자체가 100% 인지(사전 등록 누락 여부)와 BERTH 비율(P1 실효성)을 함께 본다.
+SELECT '13. facility_alias 커버리지' AS check_name,
+       CASE WHEN uncovered > 0
+              THEN 'FAIL (원천에만 있고 사전에 없는 시설명 ' || uncovered || '종 — mart_views.sql 재적용 필요)'
+            ELSE 'PASS (' || total || '종 전부 사전 등록, BERTH ' || berth_n
+                 || '종/' || round(100.0 * berth_calls / NULLIF(total_calls, 0), 1)
+                 || '% 운항건, UNMAPPED ' || unmapped_n || '종)'
+       END AS result
+FROM (
+    SELECT
+        (SELECT count(*) FROM mart.facility_alias)                                   AS total,
+        (SELECT count(*) FROM mart.facility_alias WHERE facility_type = 'BERTH')     AS berth_n,
+        (SELECT count(*) FROM mart.facility_alias WHERE facility_type = 'UNMAPPED')  AS unmapped_n,
+        (SELECT count(*) FROM (
+             SELECT DISTINCT facility_name FROM upa_port_call
+             WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+               AND facility_name NOT IN (SELECT source_name FROM mart.facility_alias)
+         ) t)                                                                        AS uncovered,
+        (SELECT count(*) FROM upa_port_call pc JOIN mart.facility_alias fa
+             ON fa.source_name = pc.facility_name)                                   AS total_calls,
+        (SELECT count(*) FROM upa_port_call pc JOIN mart.facility_alias fa
+             ON fa.source_name = pc.facility_name WHERE fa.facility_type = 'BERTH')   AS berth_calls
+) t;
+
+-- ---------------------------------------------------------------------------
+-- [검증 14] weather_now — 풍속이 실제로 채워지는가 (기상 판정 가부의 전제)
+--   항만기상 원천은 값 없이 시각만 있는 행을 계속 보낸다(실측: 하루 24행 중
+--   풍속 0~6건). 풍속이 NULL 이거나 너무 오래되면 기상 에이전트가 전 선석을
+--   "판단불가"로 떨어뜨리므로, 세 소스 통합이 실제로 값을 채우고 있는지 본다.
+--   MAX_STALENESS(3시간, backend rule_engine)와 같은 기준으로 판정한다.
+SELECT '14. 기상 판정 입력(풍속)' AS check_name,
+       CASE WHEN wind_speed_ms IS NULL
+              THEN 'FAIL (풍속 NULL — 세 소스 모두 관측값 없음)'
+            WHEN age_min > 180
+              THEN 'WARN (풍속 ' || round(age_min) || '분 전 값 — 3시간 초과라 기상 판정이 판단불가로 떨어짐, 출처 '
+                   || COALESCE(wind_source, '?') || ')'
+            ELSE 'PASS (' || wind_speed_ms || ' m/s, ' || round(age_min) || '분 전, 출처 '
+                 || COALESCE(wind_source, '?') || '/' || COALESCE(wind_station_name, '?') || ')'
+       END AS result
+FROM (
+    SELECT wind_speed_ms, wind_source, wind_station_name,
+           EXTRACT(EPOCH FROM (now() - weather_observed_at_utc)) / 60 AS age_min
+    FROM mart.weather_now
+) t;
 
 -- ---------------------------------------------------------------------------
 -- [참고 A] presence_state 임계값 실측 근거 산출 쿼리

@@ -202,6 +202,48 @@ def run_portmis(start_date: str | None = None, end_date: str | None = None) -> N
     _load(load_portmis)
 
 
+def _refresh_materialized_views() -> None:
+    """mart 스키마의 구체화 뷰를 최신 적재분 기준으로 갱신한다.
+
+    일반 뷰와 달리 MATERIALIZED VIEW 는 조회 시점에 다시 계산되지 않는다 —
+    만들어진 순간의 결과를 그대로 들고 있다가, REFRESH 를 해줘야 갱신된다.
+
+    ★ 갱신하지 않으면 무슨 일이 생기나
+      mart.facility_alias 는 upa_port_call / upa_cargo_manifest 의 시설명을
+      DISTINCT 로 훑어 만든 사전이다. 새 입항 기록이 들어오면서 처음 보는
+      시설명이 등장해도, 갱신 전까지 사전에는 없다. 그 시설은 선석 매칭에서
+      조용히 빠지고(backend dashboard.py 가 이 사전을 경유해 조인한다),
+      화면에는 "점유 중인데 여유"로 뜬다 — facility_alias 가 없앴어야 할
+      바로 그 오표시가 형태만 바꿔 되살아난다.
+
+      뷰 정의(mart_views.sql)를 다시 실행할 때는 DROP+CREATE 라 자동으로
+      최신이 되지만, 그건 사람이 수동으로 돌리는 작업이다. 매 수집마다
+      SQL 파일을 다시 실행하게 만들 수는 없으므로 여기서 갱신한다.
+
+    없는 경우(뷰 미적용 DB)는 조용히 넘어간다 — 파이프라인 적재 자체는
+    이미 끝난 뒤이고, 뷰가 없다는 건 mart_views.sql 을 아직 안 돌렸다는
+    뜻이지 적재 실패가 아니다.
+    """
+    from sqlalchemy import text
+
+    from data_pipeline.common_pg_loader import get_engine
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        exists = conn.execute(text(
+            "SELECT 1 FROM pg_matviews WHERE schemaname = 'mart' AND matviewname = 'facility_alias'"
+        )).scalar()
+        if not exists:
+            print("  - mart.facility_alias 없음 — 갱신 건너뜀 (mart_views.sql 미적용 DB)")
+            return
+        conn.execute(text("REFRESH MATERIALIZED VIEW mart.facility_alias"))
+        n = conn.execute(text("SELECT count(*) FROM mart.facility_alias")).scalar()
+        unmapped = conn.execute(text(
+            "SELECT count(*) FROM mart.facility_alias WHERE facility_type = 'UNMAPPED'"
+        )).scalar()
+    print(f"  - mart.facility_alias 갱신 완료 ({n}종, 미매핑 {unmapped}종)")
+
+
 def run_mart() -> None:
     """staging 산출물을 결합해 통합 마트를 만들고 DB에 적재한다.
 
@@ -213,10 +255,20 @@ def run_mart() -> None:
     from create_mart import build_master_mart
     from data_pipeline.loaders.mart_pg_loader import load as load_mart
 
-    print("=== [mart] 1/2 통합 마트 생성 ===")
+    print("=== [mart] 1/3 통합 마트 생성 ===")
     build_master_mart()
-    print("=== [mart] 2/2 DB 적재 ===")
+    print("=== [mart] 2/3 DB 적재 ===")
     _load(load_mart)
+    print("=== [mart] 3/3 구체화 뷰 갱신 ===")
+    if SKIP_DB:
+        print("  - --skip-db: 갱신 건너뜀")
+    else:
+        try:
+            _refresh_materialized_views()
+        except Exception as e:  # noqa: BLE001
+            # 적재는 이미 끝났다. 갱신 실패로 전체를 실패로 만들지 않되,
+            # 조용히 넘기지도 않는다 — 사전이 낡으면 선석 매칭이 틀어진다.
+            print(f"  [WARN] 구체화 뷰 갱신 실패: {e}")
 
 
 DOMAINS = {
