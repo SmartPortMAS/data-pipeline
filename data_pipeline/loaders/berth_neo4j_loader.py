@@ -216,6 +216,13 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
             "longitude": row["longitude"],
             "categories": _split_cargo_categories(row["handling_cargo_name"]),
             "berth_group": ONSAN_BERTH_GROUP_MAP.get(name),
+            # 스케줄링 에이전트가 온산 선석을 우선 배정하는 근거가 되는 값.
+            # 백엔드는 coalesce(b.onsan_scope, false)로 읽는데(scheduling/
+            # graph_queries.py) 이 속성을 만드는 곳이 없어 69개 선석 전부
+            # false 였고, 그 결과 온산 우선 정렬이 한 번도 발동하지 못했다
+            # (실측 2026-08-15: 에탄올 요청에 '신항남방파제 T/S부두'(온산 밖)가
+            #  1순위로 배정됨 — 7/26 회의 요청 4번이 이 원인으로 남아 있었다).
+            "onsan_scope": name in ONSAN_SCOPE_WHARF_NAMES,
         })
     return batch
 
@@ -239,6 +246,7 @@ ON CREATE SET
     b.latitude            = row.latitude,
     b.longitude           = row.longitude,
     b.berth_group         = row.berth_group,
+    b.onsan_scope         = row.onsan_scope,
     b.created_at          = datetime()
 ON MATCH SET
     b.wharf_name          = row.wharf_name,
@@ -252,6 +260,7 @@ ON MATCH SET
     b.latitude            = row.latitude,
     b.longitude           = row.longitude,
     b.berth_group         = row.berth_group,
+    b.onsan_scope         = row.onsan_scope,
     b.updated_at          = datetime()
 """
 
