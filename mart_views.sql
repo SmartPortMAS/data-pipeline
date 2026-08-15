@@ -711,16 +711,39 @@ pc_latest AS (
     WHERE callsgn IS NOT NULL
     ORDER BY upper(trim(callsgn)), arrival_at_utc DESC
 ),
-cargo_sum AS (
-    SELECT upper(trim(callsgn))            AS callsgn,
-           count(*)                        AS cargo_item_count,
-           count(DISTINCT bl_no)           AS bl_count,
-           count(*) FILTER (WHERE dg_un_no IS NOT NULL)        AS dg_cargo_count,
-           string_agg(DISTINCT dg_un_no::text, ',')            AS dg_un_nos,
-           string_agg(DISTINCT cargo_name_raw, ' | ')          AS cargo_names
+-- 화물은 '최신 항차' 것만 센다.
+--
+-- 예전에는 callsgn 하나로만 GROUP BY 해서 그 배의 모든 항차 화물을 합산했다.
+-- 바로 위 pm_latest·pc_latest 는 DISTINCT ON 으로 최신 입항 1건만 남기는데,
+-- 화물만 과거 항차까지 합쳐 그 1건에 붙는 구조였다.
+-- 실측(2026-08-15): 항차가 2개 이상인 선박 280척, 총 848항차, 최대 6항차.
+--
+-- 결과적으로 dashboard_current.dg_un_nos 를 통해 **지금 싣고 있지 않은 위험물**이
+-- 관제 화면에 표시됐다. 혼재 판정의 입력이 되는 값이라 그냥 두면 없는 위험을
+-- 만들어내는 셈이다.
+--
+-- 항차 자연키(ptent_yr, voyage_no)는 두 컬럼 모두 이미 적재되어 있다(bigint).
+latest_voyage AS (
+    SELECT DISTINCT ON (upper(trim(callsgn)))
+           upper(trim(callsgn)) AS callsgn, ptent_yr, voyage_no
     FROM upa_cargo_manifest
     WHERE callsgn IS NOT NULL
-    GROUP BY upper(trim(callsgn))
+    ORDER BY upper(trim(callsgn)), ptent_yr DESC NULLS LAST, voyage_no DESC NULLS LAST
+),
+cargo_sum AS (
+    SELECT upper(trim(cm.callsgn))         AS callsgn,
+           count(*)                        AS cargo_item_count,
+           count(DISTINCT cm.bl_no)        AS bl_count,
+           count(*) FILTER (WHERE cm.dg_un_no IS NOT NULL)     AS dg_cargo_count,
+           string_agg(DISTINCT cm.dg_un_no::text, ',')         AS dg_un_nos,
+           string_agg(DISTINCT cm.cargo_name_raw, ' | ')       AS cargo_names
+    FROM upa_cargo_manifest cm
+    JOIN latest_voyage lv
+      ON lv.callsgn = upper(trim(cm.callsgn))
+     AND lv.ptent_yr IS NOT DISTINCT FROM cm.ptent_yr
+     AND lv.voyage_no IS NOT DISTINCT FROM cm.voyage_no
+    WHERE cm.callsgn IS NOT NULL
+    GROUP BY upper(trim(cm.callsgn))
 )
 SELECT
     pm.callsgn,
@@ -1046,11 +1069,17 @@ berth AS (
         ('S-Oil 1부두',  11.0), ('S-Oil 2부두',  15.5), ('S-Oil 3부두',  14.0),
         ('S-Oil 4부두',  12.0), ('정일1부두',    11.0), ('정일2부두',    12.5),
         -- 울산신항
-        ('정일스톨트헤븐 신항 3~5부두', 14.0),
-        ('현대오일터미널 신항부두',     14.0),
-        ('LS니꼬 신항부두',             14.0),
-        ('UTK 신항부두',                14.0)
-    ) AS t(facility_name, chart_depth_m)
+        -- 이름은 mart.facility_alias.wharf_name(마스터 표기)과 정확히 같아야 한다.
+        -- 예전엔 '정일스톨트헤븐 신항 3~5부두'처럼 3개 선석을 한 줄로 묶어 적었는데
+        -- 마스터에는 3·4·5부두가 각각 별도 선석이라 하나도 붙지 않았다.
+        ('정일스톨트헤븐 울산신항3부두', 14.0),
+        ('정일스톨트헤븐 울산신항4부두', 14.0),
+        ('정일스톨트헤븐 울산신항5부두', 14.0),
+        ('현대오일터미널 신항1부두',     14.0),
+        ('현대오일터미널 신항2부두',     14.0),
+        ('LS MNM 신항부두',              14.0),
+        ('UTK 신항부두',                 14.0)
+    ) AS t(wharf_name, chart_depth_m)
 ),
 vessel AS (
     SELECT DISTINCT ON (upper(btrim(callsgn)))
@@ -1094,12 +1123,25 @@ SELECT
     v.received_at_utc                                   AS draught_observed_at_utc,
     pc.arrival_at_utc
 FROM pc
+-- ★ 선석 이름은 반드시 mart.facility_alias 를 거친다.
+--   pc.facility_name 은 VTS 원문('S-OIL1부두'·'SK1부두 11'·'OTK부두')이고 위 수심표는
+--   마스터 표기('S-Oil 1부두'·'SK1부두'·'OTK1부두')다. 예전에는 이 둘을 문자열
+--   완전일치로 붙여서 액체화물 전용부두가 통째로 안 맞았다.
+--   실측(2026-08-15): 판정 414건 중 UNKNOWN 387건 = 93.5%.
+--   0-B절이 바로 이 문제 때문에 facility_alias 를 만들었는데 이 뷰만 안 거치고 있었다.
+--
+--   더 나쁜 점은 조용했다는 것이다 — safety_index 의 '흘수 여유' 축이 UNKNOWN 을
+--   분모에서 빼기 때문에, 27건만 보고 98점을 내며 93.5%를 못 본 사실이 화면에
+--   드러나지 않았다.
+--
 -- ★ LEFT JOIN 이어야 한다. INNER JOIN 이면 위 berth 목록에 없는 부두(제원 미확보,
 --   부이, 신규 부두)에 접안한 선박이 판정 결과에서 통째로 사라진다. 그러면
 --   "위험하지 않다"가 아니라 "아예 안 보인다"가 되어 UNIDENTIFIED·NO_SIGNAL 을
 --   살려둔 이 프로젝트 원칙과 정면으로 어긋난다.
 --   목록에 없으면 chart_depth_m 이 NULL 이 되고 draught_verdict 는 'UNKNOWN' 이다.
-LEFT JOIN berth  b ON b.facility_name = pc.facility_name
+LEFT JOIN mart.facility_alias fa
+       ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
+LEFT JOIN berth  b ON b.wharf_name = fa.wharf_name
 LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
