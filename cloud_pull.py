@@ -63,11 +63,11 @@ def collector_health(s3) -> None:
         h = json.loads(buf.getvalue())
         print(f"  클라우드 수집기 마지막 실행: {h.get('last_run_utc')} (exit={h.get('exit_code')})")
     except Exception:
-        print("  (클라우드 수집기 생존 신호 없음 — 아직 EC2 첫 실행 전인지 확인)")
+        print("  (클라우드 수집기 생존 신호 없음 - 아직 EC2 첫 실행 전인지 확인)")
 
 
-def load_to_db() -> None:
-    """staging → 로컬 DB. run_pipeline 의 적재 단계와 동일한 로더를 쓴다."""
+def load_to_db() -> list[str]:
+    """staging → 로컬 DB. 실패한 도메인 이름 목록을 반환한다(없으면 빈 목록)."""
     from data_pipeline.upa.upa_loader import load_all as upa_load
     from data_pipeline.loaders import (
         tide_pg_loader, wave_pg_loader, weather_pg_loader,
@@ -82,34 +82,43 @@ def load_to_db() -> None:
         ("PORT-MIS", portmis_pg_loader.load),
         ("마트", mart_pg_loader.load),  # 파생 테이블 — 반드시 마지막
     ]
-    fails = 0
+    failed: list[str] = []
     for name, fn in steps:
         try:
             print(f"\n=== 적재: {name} ===")
             fn()
         except Exception as e:  # 한 도메인이 죽어도 나머지는 적재한다
-            fails += 1
+            failed.append(name)
             print(f"[실패] {name}: {e}")
-    if fails:
-        print(f"\n적재 완료 — 실패 {fails}건 (위 로그 확인)")
-    else:
-        print("\n적재 완료 — 전 도메인 성공")
+    # 문자 주의: 이 스크립트는 작업 스케줄러가 CP949 콘솔로 돌린다.
+    # em-dash 같은 문자를 쓰면 여기서 UnicodeEncodeError 로 죽고, 하필 적재가
+    # 다 끝난 뒤라 "무엇이 실패했는지"만 못 보게 된다 (2026-08-15 실증).
+    if failed:
+        print(f"\n적재 완료 - 실패 {len(failed)}건: {', '.join(failed)}")
+        return failed
+    print("\n적재 완료 - 전 도메인 성공")
+    return []
 
 
 def main() -> None:
     if not BUCKET:
-        sys.exit("SMARTPORT_S3_BUCKET 이 .env 에 없습니다 — aws/설치가이드.md 6단계 참조")
+        sys.exit("SMARTPORT_S3_BUCKET 이 .env 에 없습니다 - aws/설치가이드.md 6단계 참조")
     import boto3
 
     s3 = boto3.client("s3", region_name=REGION)
     print(f"S3 버킷: {BUCKET}")
     collector_health(s3)
-    print("다운로드 중…")
+    print("다운로드 중...")
     n = download(s3)
     print(f"  {n}개 파일 수신")
     if n == 0:
-        sys.exit("받은 파일이 없습니다 — EC2 수집기가 돌았는지 확인 (aws/설치가이드.md 8단계)")
-    load_to_db()
+        sys.exit("받은 파일이 없습니다 - EC2 수집기가 돌았는지 확인 (aws/설치가이드.md 8단계)")
+    failed = load_to_db()
+    # 한 도메인이라도 실패하면 종료코드를 0 이 아닌 값으로 남긴다.
+    # 작업 스케줄러가 매시 무인 실행하므로, 성공으로 보고되면 아무도 모른다 —
+    # 실제로 선박 위치 적재가 5시간 동안 실패하는 동안 스케줄러는 "성공"이었다.
+    if failed:
+        sys.exit(f"적재 실패 {len(failed)}건: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
