@@ -39,6 +39,24 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STAGING_DIR = os.path.join(BASE_DIR, "data", "staging")
 MART_DIR = os.path.join(BASE_DIR, "data", "mart")
 
+
+def clean_callsgn(series: pd.Series) -> pd.Series:
+    """호출부호 조인 키 정규화 — 결측을 실제 키로 만들지 않는다.
+
+    pandas 의 `astype(str)` 은 NaN 을 문자열 "NAN" 으로 바꾼다. 양쪽 프레임에서
+    그렇게 만들면 결측 호출부호끼리 "NAN" 이라는 **하나의 실제 키**로 서로 조인돼,
+    아무 관계 없는 선박의 선종·액체화물선 여부가 조용히 붙는다.
+
+    common_preprocessing.create_vessel_uid() 가 정확히 이 함정을 방어하고 있는데
+    (NULL_VALUES + "NAN" + "<NA>" 제거) create_mart 에는 그 방어가 없었다.
+    현재 PORT-MIS 쪽 호출부호 결측은 0건이라 잠복 상태지만, UPA 위치 쪽은 결측률이
+    약 31% 로 기록되어 있어(mart_views.sql 0-A절) 소스가 바뀌면 바로 발현한다.
+
+    결측은 NaN 으로 남긴다 — pandas merge 는 NaN 끼리 매칭하지 않으므로 안전하다.
+    """
+    s = series.astype("string").str.strip().str.upper()
+    return s.replace(list(cu.NULL_VALUES) + ["NAN", "<NA>", "NONE"], pd.NA)
+
 # 울산항 관제 목표 좌표 (입항 정박지 대표 좌표) — 부두별 좌표를 못 찾을 때의 폴백.
 ULSAN_TARGET_LAT = 35.475
 ULSAN_TARGET_LON = 129.387
@@ -124,7 +142,7 @@ def build_master_mart():
         )
 
     # 3-2. PORT-MIS: 호출부호(callsgn)별 중복 제거 (대소문자 및 양끝 공백 제거 후 최신 1건 유지)
-    df_portmis["callsgn_clean"] = df_portmis["callsgn"].astype(str).str.strip().str.upper()
+    df_portmis["callsgn_clean"] = clean_callsgn(df_portmis["callsgn"])
     df_portmis_clean = (
         df_portmis
         .sort_values(by="collected_at_utc", ascending=True)
@@ -161,7 +179,7 @@ def build_master_mart():
     # 4-2. 위치 + PORT-MIS (Key: callsgn)
     # 선종(ship_kind)·액체화물선 여부는 공식 신고 데이터인 PORT-MIS 에서 확정한다.
     if "callsgn" in mart.columns:
-        mart["callsgn_clean"] = mart["callsgn"].astype(str).str.strip().str.upper()
+        mart["callsgn_clean"] = clean_callsgn(mart["callsgn"])
         
         # PORT-MIS에서 필요한 정보 선택 (중복 제거)
         portmis_cols_to_use = [
@@ -268,7 +286,7 @@ def build_master_mart():
     if os.path.exists(upa_port_call_path):
         print(" 4-1) UPA 입항 실적(Port Call) 데이터 병합 중...")
         df_upa_pc = pd.read_csv(upa_port_call_path, encoding="utf-8-sig")
-        df_upa_pc["callsgn_clean"] = df_upa_pc["callsgn"].astype(str).str.strip().str.upper()
+        df_upa_pc["callsgn_clean"] = clean_callsgn(df_upa_pc["callsgn"])
         
         # 호출부호별로 가장 최신 1건만 남김
         df_upa_pc_clean = df_upa_pc.sort_values(by="arrival_at_utc", ascending=True).drop_duplicates(subset=["callsgn_clean"], keep="last")
@@ -277,7 +295,7 @@ def build_master_mart():
         upa_pc_cols = [c for c in upa_pc_cols if c in df_upa_pc_clean.columns]
         
         if "callsgn" in mart.columns:
-            mart["callsgn_clean"] = mart["callsgn"].astype(str).str.strip().str.upper()
+            mart["callsgn_clean"] = clean_callsgn(mart["callsgn"])
             mart = pd.merge(
                 mart,
                 df_upa_pc_clean[upa_pc_cols],

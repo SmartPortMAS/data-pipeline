@@ -189,7 +189,7 @@ def preprocess_portmis():
         .fillna("기타/불명")
     )
 
-    # 9. 액체화물선 여부 플래그
+    # 9. 액체화물선 '본선' 여부 플래그
     # 코드 세트 OR 선종명 키워드로 판정 — 코드 체계 변동에 견고.
     _cd = df["ship_kind_cd"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
     _by_code = _cd.isin(LIQUID_CARGO_KIND_CODES)
@@ -198,7 +198,18 @@ def preprocess_portmis():
         _by_name = df["ship_kind_nm"].astype(str).str.contains(_pat, case=False, na=False)
     else:
         _by_name = False
-    df["is_liquid_cargo_vessel"] = _by_code | _by_name
+
+    # 부선(73~75)은 이름 키워드에 걸려도 본선으로 세지 않는다.
+    #
+    # 이 가드가 없으면 아래 주석(9-1)이 선언한 "부선은 본선과 분리한다"가 이름 분기
+    # 하나로 무너진다. 실제로 그랬다 —
+    #     73 원유운반용부선   → 이름에 '원유' → 본선으로 샘  ❌
+    #     74 석유제품운반용부선 → 이름에 '석유' → 본선으로 샘 ❌
+    #     75 화공약품운반용부선 → 키워드 없음  → 안 샘        ✅
+    # 같은 부선 3종이 임의로 쪼개져, 코드가 정본인데 이름이 그걸 뒤집는 상태였다.
+    # (급유선 93 에 대해 :113 이 걱정한 "척수가 부풀려진다"가 부선에서 발생)
+    _is_barge = _cd.isin(LIQUID_CARGO_BARGE_CODES)
+    df["is_liquid_cargo_vessel"] = (_by_code | _by_name) & ~_is_barge
 
     # 9-1. 액체화물 부선(바지) 여부 — 본선과 성격이 달라(비자항) 별도 플래그로 분리.
     # 관제·통계에서 본선에 합산할지는 팀 판단 필요.
@@ -208,13 +219,22 @@ def preprocess_portmis():
     # 하역 스케줄링 통계에서는 제외하되, 화재·인화 위험 관제에서는 참조 가능.
     df["is_bunkering_vessel"] = _cd.isin(BUNKERING_VESSEL_CODES)
 
-    # 10. 국내/국제 항로 여부 판단
-    # origin_port_cd가 'KR'로 시작하면 국내 항로
-    df["is_domestic_voyage"] = (
-        df["origin_port_cd"]
-        .fillna("")
-        .str.startswith("KR")
-    )
+    # 10. 국내/국제 항로 여부 판단 — '직전' 출발항 기준
+    #
+    # 예전에는 origin_port_cd(frstDpmprtNatPrtCd = 최초 출발항)를 썼는데, 그건
+    # 이번 항차의 국내/국제가 아니라 그 배가 애초에 어디서 출발했는지다.
+    # 실측(raw 121행) 최초 ≠ 직전이 13건:
+    #     KMTC JAKARTA : 최초 HKHKG(홍콩) / 직전 KRPUS(부산)
+    #       → 이번 구간은 부산→울산 연안인데 '국제'로 판정됐다
+    #     스타 파이오니아 : 최초 KRKAN(광양) / 직전 KRPUS(부산)
+    # 이번 항차를 보려면 prev_port_cd(prvsDpmprtNatPrtCd = 직전 출발항)가 맞다.
+    # 두 컬럼 모두 이미 수집·적재되어 있다(COLUMN_MAP 참고).
+    #
+    # 결측은 False(국제)로 접지 않고 None 으로 둔다 — 모르는 것을 단정하지 않는다는
+    # 이 파이프라인 원칙(quality_flag·identity_confidence 와 같은 취급)에 맞춘다.
+    _prev = df["prev_port_cd"] if "prev_port_cd" in df.columns else pd.Series(index=df.index, dtype=object)
+    _prev_s = _prev.astype("string").str.strip()
+    df["is_domestic_voyage"] = _prev_s.str.startswith("KR").astype("boolean")
 
     # 11. 항만청 이름 코드 기반으로 명시적 레이블링
     port_cd_map = {"820": "울산항", "300": "온산항"}
