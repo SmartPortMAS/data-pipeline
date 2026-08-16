@@ -2,12 +2,11 @@
 """
 울산항만공사(UPA) Open API 전처리 파이프라인 (담당: 함현우)
 
-대상 API (6종)
+대상 API (5종)
   1. 항만 내 선박 운항정보 (getVtsBaseVslNvgtInfo)  -> upa_port_call_stg.csv
   2. 항내 선박위치정보      (getVslPstnInfo)          -> upa_vessel_position_stg.csv
   3-1. 통합화물 정보        (getIntgCagInfo)          -> upa_cargo_manifest_stg.csv
   3-2. 내항화물 정보        (getInprtCagDclrInfo)     -> upa_cargo_manifest_stg.csv (concat)
-  4. 선박 하역정보          (getUnloadRcdInfo)        -> upa_unload_record_stg.csv
   5-1. 부두(항만시설) 정보  (getGisBaseHrbrFcltDtlInfo) -> upa_berth_facility_stg.csv
   5-2. 정박지 정보          (getGisBaseAnchrgDtlInfo)   -> upa_anchorage_stg.csv
 
@@ -185,16 +184,6 @@ def preprocess_inprt_cargo(df: pd.DataFrame, is_synthetic: bool = False) -> pd.D
     return df
 
 
-def preprocess_unload_record(df: pd.DataFrame, is_synthetic: bool = False) -> pd.DataFrame:
-    """4. 선박 하역정보 -> 하역 기록."""
-    spec = cfg.UNLOAD_RCD_INFO
-    df = _apply_common(df, spec, is_synthetic)
-    df = common.flag_missing_key(df, spec["key_cols"])
-    for start_col, end_col in spec.get("date_order_pairs", []):
-        df = common.validate_date_order(df, start_col, end_col)
-    return df
-
-
 def preprocess_berth_facility(df: pd.DataFrame, is_synthetic: bool = False) -> pd.DataFrame:
     """5-1. 부두(항만시설) 정보 -> 부두."""
     spec = cfg.HRBR_FCLT_INFO
@@ -231,7 +220,6 @@ PIPELINES = {
     "vessel_position": (preprocess_vessel_position, cfg.VSL_PSTN_INFO),
     "intg_cargo": (preprocess_intg_cargo, cfg.INTG_CAG_INFO),
     "inprt_cargo": (preprocess_inprt_cargo, cfg.INPRT_CAG_DCLR_INFO),
-    "unload_record": (preprocess_unload_record, cfg.UNLOAD_RCD_INFO),
     "berth_facility": (preprocess_berth_facility, cfg.HRBR_FCLT_INFO),
     "anchorage": (preprocess_anchorage, cfg.ANCHRG_INFO),
 }
@@ -312,7 +300,6 @@ if __name__ == "__main__":
     examples = {
         "vessel_nvgt": [f"{base}/upa_vessel_nvgt_raw.json"],
         "vessel_position": [f"{base}/upa_vessel_position_raw.json"],
-        "unload_record": [f"{base}/upa_unload_record_raw.json"],
         "berth_facility": [f"{base}/upa_berth_facility_raw.json"],
         "anchorage": [f"{base}/upa_anchorage_raw.json"],
     }

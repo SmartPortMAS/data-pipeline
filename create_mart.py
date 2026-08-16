@@ -261,9 +261,8 @@ def build_master_mart():
         mart = mart.rename(columns={"observed_at_utc": "wave_observed_at_utc"})
         print("    - 파고 데이터 병합 완료")
 
-    # 5-2. (현우 팀원) UPA 입항 실적(Port Call) 및 하역 기록(Unload Record) 연계
+    # 5-2. (현우 팀원) UPA 입항 실적(Port Call) 연계
     upa_port_call_path = os.path.join(STAGING_DIR, "upa_port_call_stg.csv")
-    upa_unload_path = os.path.join(STAGING_DIR, "upa_unload_record_stg.csv")
 
     if os.path.exists(upa_port_call_path):
         print(" 4-1) UPA 입항 실적(Port Call) 데이터 병합 중...")
@@ -288,29 +287,6 @@ def build_master_mart():
             mart = mart.drop(columns=["callsgn_clean"])
             print("    - UPA 입항 실적 데이터 병합 완료")
 
-    if os.path.exists(upa_unload_path):
-        print(" 4-2) UPA 하역 기록(Unload Record) 데이터 병합 중...")
-        df_upa_unload = pd.read_csv(upa_unload_path, encoding="utf-8-sig")
-        df_upa_unload["vessel_name_clean"] = df_upa_unload["vessel_name"].astype(str).str.strip().str.upper()
-        
-        # 선박명별로 가장 최신의 1건만 남김
-        df_upa_unload_clean = df_upa_unload.sort_values(by="registered_at_utc", ascending=True).drop_duplicates(subset=["vessel_name_clean"], keep="last")
-        
-        upa_unload_cols = ["vessel_name_clean", "product_type", "bl_cargo_qty", "unload_begin_at_utc", "unload_complete_at_utc", "job_record_info"]
-        upa_unload_cols = [c for c in upa_unload_cols if c in df_upa_unload_clean.columns]
-        
-        if "vessel_name" in mart.columns:
-            mart["vessel_name_clean"] = mart["vessel_name"].astype(str).str.strip().str.upper()
-            mart = pd.merge(
-                mart,
-                df_upa_unload_clean[upa_unload_cols],
-                on="vessel_name_clean",
-                how="left",
-                suffixes=("", "_unload")
-            )
-            mart = mart.drop(columns=["vessel_name_clean"])
-            print("    - UPA 하역 기록 데이터 병합 완료")
-
     # 5-3. (MSDS 데이터) 화물 기준 유해성 정보 연계
     msds_path = os.path.join(STAGING_DIR, "msds_chemical_stg.csv")
     if os.path.exists(msds_path):
@@ -327,15 +303,11 @@ def build_master_mart():
         ]
         df_msds_sel = df_msds_clean[msds_cols]
         
-        # 현재 mart에 결합할 화물명 기준을 확보하기 위해:
-        # 우선 UPA 하역 정보의 product_type을 사용하고, 없을 경우 PORT-MIS 정보나 선종 매핑 정보로 대체
-        # (UPA 화물 데이터 수집 전이므로, 울산 입항 선박 중 화학제품선/탱커의 경우 샘플 화물을 할당해 MSDS 연계를 검증)
-        
-        if "product_type" in mart.columns:
-            mart["cargo_name_for_msds"] = mart["product_type"].fillna("")
-        else:
-            mart["cargo_name_for_msds"] = ""
-            
+        # 현재 mart에는 UPA 화물 정보 병합이 없으므로(upa_unload_record 제거,
+        # 2026-08-16) cargo_name_for_msds는 아래 샘플 화물명 주입에만 의존한다.
+        # (울산 입항 선박 중 화학제품선/탱커의 경우 샘플 화물을 할당해 MSDS 연계를 검증)
+        mart["cargo_name_for_msds"] = ""
+
         # target vessel 들에 대해 MSDS 조인이 동작하도록 product_type이 빈 칸인 경우 샘플 화물명 주입
         # 벤젠, 가솔린, 톨루엔 등 msds_chemical_stg.csv에 존재하는 원본 이름으로 설정
         benzene_mask = mart["vessel_name"].astype(str).str.upper().str.contains("CLIPPER GRACE|MU DAN YUAN")

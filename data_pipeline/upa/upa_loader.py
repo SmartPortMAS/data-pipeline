@@ -44,7 +44,6 @@ TABLE_MAP = {
     # (선박별 입항 1건만 필요한 소비자는 DISTINCT ON (port_call_id) 로 쓰면 된다)
     "upa_port_call_stg.csv": ("upa_port_call", ["port_call_id", "comm_count"]),
     "upa_cargo_manifest_stg.csv": ("upa_cargo_manifest", ["record_uid"]),
-    "upa_unload_record_stg.csv": ("upa_unload_record", ["unload_record_id"]),
     "upa_berth_facility_stg.csv": ("upa_berth_facility", ["wharf_name"]),
     "upa_anchorage_stg.csv": ("upa_anchorage", ["anchorage_name"]),
 }

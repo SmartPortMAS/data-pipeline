@@ -45,7 +45,6 @@ python -m data_pipeline.upa.upa_scheduler
 | 2 | `getVslPstnInfo` | 항내 선박위치정보 | `upa_vessel_position_stg.csv` |
 | 3-1 | `getIntgCagInfo` | 통합화물 정보 | `upa_cargo_manifest_stg.csv` |
 | 3-2 | `getInprtCagDclrInfo` | 내항화물 정보 | `upa_cargo_manifest_stg.csv` (concat) |
-| 4 | `getUnloadRcdInfo` | 선박 하역정보 | `upa_unload_record_stg.csv` |
 | 5-1 | `getGisBaseHrbrFcltDtlInfo` | 부두(항만시설) 정보 | `upa_berth_facility_stg.csv` |
 | 5-2 | `getGisBaseAnchrgDtlInfo` | 정박지 정보 | `upa_anchorage_stg.csv` |
 
@@ -78,7 +77,7 @@ upa.run_cargo_combined(
 ```
 
 `run_pipeline` 의 api_key: `vessel_nvgt`, `vessel_position`, `intg_cargo`,
-`inprt_cargo`, `unload_record`, `berth_facility`, `anchorage`.
+`inprt_cargo`, `berth_facility`, `anchorage`.
 
 로더는 data.go.kr 표준 구조(`response.body.items.item`)와 단건 dict / list 응답을
 모두 처리한다. 페이지가 여러 개면 경로 리스트로 넘기면 자동 concat 된다.
@@ -97,16 +96,7 @@ upa.run_cargo_combined(
 
 ## 5. 사용이 어렵거나 추가가 필요한 데이터 (팀 공유용)
 
-### 5-1. 하역정보(`getUnloadRcdInfo`)가 다른 데이터와 잘 안 붙는다 ⚠️ (가장 큰 문제)
-- 하역정보에는 **`callsgn`, `ptentYr`, `vyg`가 전혀 없다.** `vslNm`(선박명)과
-  `blNoCn`(선화증권번호)만 있어 `port_call_id`를 만들 수 없다.
-- 즉 하역 스케줄링의 핵심 테이블인데 운항/화물 테이블과 **선박명 문자열 매칭**으로만
-  조인해야 함 → 동명이선·표기 차이로 정확도 떨어짐.
-- **대안**: `bl_no`(선화증권번호)를 화물정보(`getIntgCagInfo`의 `blNo`)와 조인키로
-  사용. 화물 manifest를 경유해 `bl_no → port_call_id`로 간접 연결하는 매핑
-  테이블이 필요하다. (현재 manifest에 `bl_no` 보존해 둠)
-
-### 5-2. 운항정보/화물정보는 호출부호+연도+항차가 **필수 파라미터**
+### 5-1. 운항정보/화물정보는 호출부호+연도+항차가 **필수 파라미터**
 - API 명세상 `callsgn`, `ptentYr/ptentVtsYr`, `vyg`(화물은 `bzentyCd`까지) 가 필수.
   즉 **특정 선박/항차를 이미 알고 있어야** 조회 가능 → "오늘 입항 전체 목록"을
   한 번에 못 받는다. 선박위치(`getVslPstnInfo`)·부두·정박지로 후보 callsgn을 먼저
