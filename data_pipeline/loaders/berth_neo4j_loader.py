@@ -171,6 +171,44 @@ def ensure_neo4j_schema(driver) -> None:
 # PostgreSQL -> 배치 행 변환
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 취급화물 큐레이션 보정 (원천 시설데이터의 라벨이 실제 운영과 어긋나는 선석)
+#
+# 원천의 handling_cargo_name 은 대분류라, 물리적으로 전혀 다른 설비를 같은
+# '유류'로 묶어 놓은 곳이 있다. 그대로 두면 스케줄링 에이전트가 실제로는
+# 댈 수 없는 선석을 후보로 올린다(2026-08-18 실측 확인).
+#
+#  · 석유공사부이 — 원천 '유류'. 그러나 수심 27 m 해상 계류점(SPM)이고 운영사가
+#    한국석유공사(원유비축기지)다. 같은 데이터의 다른 부이 4기(SK2·SK3·S-Oil·
+#    S-Oil&오일허브)는 전부 '원유'로 라벨돼 있고, 우리 선석 큐레이션
+#    (frontend geoUtils.ONSAN_BERTHS)도 이 부이를 '원유'로 적고 있다.
+#    '유류'로 두면 흘수 6 m 짜리 제품유 운반선이 VLCC용 부이에 배정된다.
+#
+#  · 가스부두 / SK1부두 / SK2부두(SK가스㈜ 운영분) — 원천 '유류'. 운영사가
+#    SK가스㈜인 LPG 터미널이다. LPG 운반선은 가압·냉동 탱크와 증기환수 배관이
+#    있는 전용 터미널에만 댈 수 있어, 일반 석유제품 부두와 같은 카테고리로
+#    묶으면 안 된다. 실제로 지금 재항 중인 가스선(가스 프리웨이·에코 가스·
+#    HENRIETTA KOSAN 등)이 전부 이 경로로 잘못 매칭됐다.
+#    ※ 'SK2부두'는 SK가스㈜(수심 7.5)와 SK에너지㈜(수심 8.0) 두 곳이 같은
+#      이름을 쓴다 — 그래서 키를 (선석명, 운영사)로 잡는다.
+#
+# 원천 테이블을 직접 고치지 않는 이유: 수집기가 다시 돌면 되돌아간다.
+# 보정은 여기 한 곳에만 두고, 근거를 남겨 팀이 검토할 수 있게 한다.
+# ─────────────────────────────────────────────────────────────────────────────
+HANDLING_CARGO_OVERRIDES: dict[tuple[str, str], str] = {
+    ("석유공사부이", "한국석유공사"): "원유",
+    ("가스부두", "SK가스㈜"): "가스",
+    ("SK1부두", "SK가스㈜"): "가스",
+    ("SK2부두", "SK가스㈜"): "가스",
+}
+
+
+def _handling_cargo(row: dict) -> str | None:
+    """원천 취급화물명에 큐레이션 보정을 적용한다."""
+    key = (row.get("wharf_name"), row.get("port_operator_name"))
+    return HANDLING_CARGO_OVERRIDES.get(key, row.get("handling_cargo_name"))
+
+
 def _split_cargo_categories(handling_cargo_name: str | None) -> list[str]:
     """"잡화, 액체화학" 같은 콤마 구분 텍스트를 개별 카테고리 목록으로 분리."""
     if not handling_cargo_name:
@@ -209,12 +247,12 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
             "length_m": row["length_m"],
             "depth_m": row["depth_m"],
             "berth_capacity": row["berth_capacity"],
-            "handling_cargo_name": row["handling_cargo_name"],
+            "handling_cargo_name": _handling_cargo(row),
             "wharf_se_name": row["wharf_se_name"],
             "port_operator_name": row["port_operator_name"],
             "latitude": row["latitude"],
             "longitude": row["longitude"],
-            "categories": _split_cargo_categories(row["handling_cargo_name"]),
+            "categories": _split_cargo_categories(_handling_cargo(row)),
             "berth_group": ONSAN_BERTH_GROUP_MAP.get(name),
             # 스케줄링 에이전트가 온산 선석을 우선 배정하는 근거가 되는 값.
             # 백엔드는 coalesce(b.onsan_scope, false)로 읽는데(scheduling/
@@ -264,6 +302,20 @@ ON MATCH SET
     b.updated_at          = datetime()
 """
 
+# 이 선석이 더 이상 취급하지 않는 카테고리 관계를 먼저 끊는다.
+#
+# MERGE 는 추가만 하고 지우지 않는다. 그래서 취급화물이 바뀌면(원천 갱신이나
+# HANDLING_CARGO_OVERRIDES 보정) 옛 관계가 그대로 남아 두 카테고리를 동시에
+# 취급하는 것처럼 보였다 — 2026-08-18 실측: 석유공사부이를 '원유'로 보정한 뒤에도
+# '유류' 관계가 남아, 제품유 후보에서 빼려던 목적이 그대로 무산됐다.
+# 재적재가 몇 번을 돌아도 같은 결과가 되도록(멱등) 배치에 있는 선석만 정리한다.
+_CYPHER_PRUNE_HANDLES = """
+UNWIND $batch AS row
+MATCH (b:Berth {id: row.berth_id})-[r:HANDLES]->(cat:CargoCategory)
+WHERE NOT cat.name IN row.categories
+DELETE r
+"""
+
 _CYPHER_MERGE_HANDLES = """
 UNWIND $batch AS row
 MATCH (b:Berth {id: row.berth_id})
@@ -296,6 +348,7 @@ def _tx_merge_berth(tx, batch: list[dict]) -> None:
 
 
 def _tx_merge_handles(tx, batch: list[dict]) -> None:
+    tx.run(_CYPHER_PRUNE_HANDLES, batch=batch)
     tx.run(_CYPHER_MERGE_HANDLES, batch=batch)
 
 

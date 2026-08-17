@@ -1394,3 +1394,50 @@ SELECT DISTINCT
 FROM in_port ip
 JOIN mart.cargo_msds cm ON cm.callsgn = ip.callsgn
 WHERE cm.dg_un_no IS NOT NULL;   -- 위험물 화물만 (혼재금지 판정 대상)
+
+
+-- ---------------------------------------------------------------------------
+-- 11. mart.berth_dwell_stats   선석별 재항 소요시간 실측 통계
+--     (upa_port_call 완료 건: 입항 ~ 출항 실측 29,607건 기준)
+--
+-- 왜 필요한가: 스케줄링 에이전트가 지금까지 답할 수 있는 것은 "이 선석이
+-- 점유인가 여유인가" 둘뿐이었다. 그런데 관제사가 실제로 묻는 것은 "그럼
+-- 언제 비는가"다. 그 답이 없으면 '배정'은 되지만 '스케줄링'은 되지 않는다.
+--
+-- 출항 예정 시각(ETD)이 있으면 그걸 쓰는 게 맞지만, portmis_vessel.
+-- departure_sched_utc 는 779행 전부 비어 있다(2026-08-18 실측 — 원천 API 가
+-- 이 필드를 주지 않는다). 대신 우리에게는 실제로 몇 시간 머물렀는지가
+-- 3만 건 가까이 쌓여 있으므로, 그 분포에서 추정한다.
+--
+-- 평균이 아니라 중앙값(P50)을 대표값으로 쓴다. 재항시간은 꼬리가 매우 길어
+-- (장생포호안 평균 127h vs 중앙값 39h) 평균은 몇 건의 장기 계류에 끌려간다.
+-- P90 을 함께 내보내 "보통 이 정도, 길면 이 정도"를 화면이 같이 말할 수 있게 한다.
+--
+-- 주의 — 이 값은 '하역 시간'이 아니라 '재항 시간'이다. 접안 대기·검사·급유가
+-- 모두 포함돼 있어 실제 하역 작업시간보다 길다. 화면은 이 값을 '하역 소요'가
+-- 아니라 '재항 소요(해제까지)'로 표기해야 한다.
+--
+-- 표본이 5건 미만인 선석은 내보내지 않는다 — 한두 건으로 만든 중앙값을
+-- 화면이 예측처럼 보여주면 근거 없는 숫자가 된다(모르면 말하지 않는다).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.berth_dwell_stats AS
+SELECT fa.wharf_name,
+       count(*)                                                   AS sample_count,
+       round((percentile_cont(0.5) WITHIN GROUP (
+           ORDER BY EXTRACT(EPOCH FROM (pc.departure_at_utc - pc.arrival_at_utc)) / 3600.0
+       ))::numeric, 1)                                            AS median_hours,
+       round((percentile_cont(0.9) WITHIN GROUP (
+           ORDER BY EXTRACT(EPOCH FROM (pc.departure_at_utc - pc.arrival_at_utc)) / 3600.0
+       ))::numeric, 1)                                            AS p90_hours,
+       max(pc.departure_at_utc)                                   AS latest_sample_utc
+FROM upa_port_call pc
+JOIN mart.facility_alias fa
+  ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
+WHERE pc.arrival_at_utc IS NOT NULL
+  AND pc.departure_at_utc IS NOT NULL
+  AND pc.departure_at_utc > pc.arrival_at_utc
+  -- 30일을 넘는 건은 계선(장기 정박)으로 보고 뺀다. 하역 회전과 성격이 달라
+  -- 같이 섞으면 중앙값이 위로 끌려간다.
+  AND pc.departure_at_utc - pc.arrival_at_utc < INTERVAL '30 days'
+GROUP BY fa.wharf_name
+HAVING count(*) >= 5;
