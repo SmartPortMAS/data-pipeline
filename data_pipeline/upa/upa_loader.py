@@ -20,7 +20,9 @@ AIS/PORTMIS/tide/wave/weather 로더와 공유한다 (data_pipeline/loaders/*_pg
 실행:
   python -m data_pipeline.upa.upa_loader
 """
-from data_pipeline.common_pg_loader import load_all as _load_all
+from sqlalchemy import text
+
+from data_pipeline.common_pg_loader import get_engine, load_all as _load_all
 
 # staging 파일명 -> (DB 테이블명, upsert 유니크 키)
 #
@@ -49,8 +51,36 @@ TABLE_MAP = {
 }
 
 
+# upa_cargo_manifest는 전 행 is_synthetic=True — 실제로 존재하는 안정적 개체가
+# 아니라 매 실행마다 무작위로 새로 지어내는 "가짜 스냅샷 하나"다(bzentyCd 미확보로
+# 실데이터 수집 불가라 gen_cargo_manifest.py가 대체). record_uid가 행 전체 해시라
+# 내용이 랜덤으로 바뀔 때마다 "새 행"으로 잡혀, UPSERT를 그대로 쓰면 과거 실행분이
+# 안 지워지고 계속 쌓인다(실측: 한 화물명 오탈자 수정 후 재생성했더니 예전 오탈자
+# 행 32건이 새 행과 나란히 남아있었음, 2026-08-17). 그래서 이 표만 예외적으로
+# "적재 전 전체 교체"로 다룬다 — 실제 API 데이터 표(upa_port_call 등)는 자연키
+# UPSERT가 맞으므로 건드리지 않는다.
+#
+# ★ 알려진 한계(2026-08-17, 의도적으로 안 고침): 아래 TRUNCATE는 이 함수 자체의
+# 트랜잭션으로 즉시 커밋되고, 실제 재적재(_load_all)는 그 뒤 별도 트랜잭션에서
+# 일어난다 — 그 사이 짧게 이 표가 비어 있는 창이 생긴다(mart.berth_current_cargo가
+# 그 순간 조회되면 "인접 화물 없음"으로 잘못 읽힐 수 있음). 완전히 없애려면
+# common_pg_loader.upsert_dataframe()이 외부 트랜잭션을 받아써서 TRUNCATE+INSERT를
+# 하나로 묶어야 하는데, 그건 다른 7개 테이블이 같이 쓰는 공용 로더라 범위가 커서
+# 보류함. gen_cargo_manifest.py는 사람이 수동으로만 실행하고(자동 스케줄 없음,
+# run_pipeline.py DOMAINS·upa_scheduler.py 어디에도 없음) 실행 빈도가 낮아
+# 지금은 감수하기로 함.
+def _replace_cargo_manifest(engine) -> None:
+    with engine.begin() as conn:
+        # 신규 환경(첫 실행)에서는 아직 테이블이 없을 수 있다 — TRUNCATE는
+        # DROP TABLE과 달리 IF EXISTS 구문이 없어 존재 여부를 먼저 확인한다.
+        exists = conn.execute(text("SELECT to_regclass('public.upa_cargo_manifest')")).scalar()
+        if exists:
+            conn.execute(text("TRUNCATE TABLE upa_cargo_manifest"))
+
+
 def load_all(staging_dir: str = "data/staging") -> None:
     """staging 폴더의 모든 UPA staging CSV 를 PostgreSQL 에 적재."""
+    _replace_cargo_manifest(get_engine())
     _load_all(TABLE_MAP, staging_dir=staging_dir)
 
 
