@@ -2,8 +2,12 @@
 portmis_collector.py
 ==================
 해양수산부 선박운항정보 API (PORT-MIS, VsslEtrynd5)를 활용하여
-울산항(prtAgCd=820) + 온산항(prtAgCd=300) 입출항 기록을 수집하고
+울산항(prtAgCd=820) 입출항 기록을 수집하고
 data/raw/portmis/ 에 저장합니다.
+
+(2026-08-16) 온산항을 별도 prtAgCd=300으로 조회하던 로직 제거 — PORT-MIS에는
+온산항 전용 항만청 코드가 실제로 존재하지 않는다(300은 잘못된 값이었음).
+온산항은 울산항(820) 조회 결과에 포함되어 들어온다.
 
 사용법:
     python data_pipeline/collectors/portmis_collector.py [--start YYYYMMDD] [--end YYYYMMDD]
@@ -15,7 +19,7 @@ data/raw/portmis/ 에 저장합니다.
     data/raw/portmis/portmis_vessel_<YYYYMMDD>_<YYYYMMDD>.json
 
 PORT-MIS 응답 필드 설명 (실제 API 검증 완료 기준):
-    prtAgCd          : 항만청 코드 (820=울산, 300=온산)
+    prtAgCd          : 항만청 코드 (820=울산)
     prtAgNm          : 항만청 명칭
     etryptYear       : 입항 연도
     etryptCo         : 입항 횟수 (선박별 연간 누적)
@@ -66,10 +70,9 @@ if not os.getenv("PORT_MIS_API_KEY"):
 SERVICE_KEY = os.environ["PORT_MIS_API_KEY"]
 BASE_URL = "http://apis.data.go.kr/1192000/VsslEtrynd5/Info5"
 
-# 울산항(820) + 온산항(300) 모두 조회
+# 울산항(820)만 조회 — 온산항 전용 코드(300)는 실재하지 않는 잘못된 값이었음
 PORT_CODES = {
     "820": "울산항",
-    "300": "온산항",
 }
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -145,7 +148,7 @@ def fetch_vessel_entries(port_code: str, start_date: str, end_date: str) -> list
 
 
 def collect_portmis(start_date: str, end_date: str):
-    """울산항 + 온산항의 입출항 기록을 수집하여 JSON 파일로 저장."""
+    """울산항의 입출항 기록을 수집하여 JSON 파일로 저장."""
     os.makedirs(RAW_PORTMIS_DIR, exist_ok=True)
     output_filename = f"portmis_vessel_{start_date}_{end_date}.json"
     output_path = os.path.join(RAW_PORTMIS_DIR, output_filename)
@@ -173,7 +176,7 @@ def collect_portmis(start_date: str, end_date: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="PORT-MIS 울산/온산항 선박 입출항 수집기")
+    parser = argparse.ArgumentParser(description="PORT-MIS 울산항 선박 입출항 수집기")
     today_str = datetime.datetime.now().strftime("%Y%m%d")
     parser.add_argument("--start", type=str, default=today_str, help="조회 시작일 (YYYYMMDD). 기본: 오늘")
     parser.add_argument("--end", type=str, default=today_str, help="조회 종료일 (YYYYMMDD). 기본: 오늘")

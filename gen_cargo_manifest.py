@@ -158,10 +158,34 @@ LIQUID_FACILITIES = [
     "정일1부두", "정일2부두", "OTK1부두", "OTK2부두", "UTK부두", "UTT부두",
     "S-Oil 1부두", "S-Oil 2부두", "S-Oil 3부두", "S-Oil 4부두",
     "SK1부두", "SK2부두", "SK3부두", "SK4부두", "SK5부두", "SK6부두",
-    "SK7부두", "SK8부두", "가스부두", "효성부두", "대한유화부두", "용잠부두",
+    "SK7부두", "SK8부두", "가스부두", "효성부두", "대한유화부두",
+    "용잠1부두", "용잠2부두",
     "현대오일터미널 신항1부두", "현대오일터미널 신항2부두",
 ]
 DRY_FACILITIES = ["1부두", "5부두", "7부두", "8부두", "신항일반부두", "온산1부두", "염포부두"]
+
+# 부두별 동시접안 가능 척수(berth.max_concurrent_vessels 실측값, 2026-08-17 대조).
+# 목록에 없으면 1로 본다. random.choice만 쓰면 24~31개 부두 중 특정 한 곳에
+# 우연히 몰릴 수 있는데(실측: 서로 다른 배 16척이 한 부두에 동시 배정된 사례 —
+# 실제로는 부두 하나에 유조선이 1~5척밖에 못 붙는다), 이 표를 기준으로 용량 대비
+# 사용률이 가장 낮은 곳부터 채우면 최소한 특정 부두에만 비현실적으로 쌓이지는
+# 않는다(TARGET_ROWS가 전체 용량 합보다 많아 초과 배정 자체는 남는다).
+FACILITY_CAPACITY: dict[str, int] = {
+    "정일1부두": 2, "정일2부두": 2, "OTK1부두": 2, "OTK2부두": 2, "UTK부두": 2, "UTT부두": 1,
+    "S-Oil 1부두": 2, "S-Oil 2부두": 3, "S-Oil 3부두": 2, "S-Oil 4부두": 3,
+    "SK1부두": 2, "SK2부두": 4, "SK3부두": 1, "SK4부두": 3, "SK5부두": 5, "SK6부두": 1,
+    "SK7부두": 1, "SK8부두": 1, "가스부두": 3, "효성부두": 1, "대한유화부두": 2,
+    "용잠1부두": 1, "용잠2부두": 1,
+    "현대오일터미널 신항1부두": 1, "현대오일터미널 신항2부두": 1,
+    "1부두": 1, "5부두": 1, "7부두": 1, "8부두": 2, "신항일반부두": 2, "온산1부두": 1, "염포부두": 3,
+}
+
+
+def _pick_facility(candidates: list, usage: dict) -> str:
+    """용량 대비 사용률(usage/capacity)이 가장 낮은 후보를 고르고 사용량을 1 늘린다."""
+    best = min(candidates, key=lambda f: usage.get(f, 0) / FACILITY_CAPACITY.get(f, 1))
+    usage[best] = usage.get(best, 0) + 1
+    return best
 
 # ---------------------------------------------------------------------------
 # 인접 선석쌍 — berth_neo4j_loader.PILOT_ADJACENT_PAIRS 와 동일(ADJACENT_TO).
@@ -511,16 +535,18 @@ def build_v2(pool):
     """
     liquids = [v for v in pool if v[3]]
     others = [v for v in pool if not v[3]]
-    if not liquids and not others:
-        liquids = [(f"TEST{i:03d}", f"샘플선박{i}", "", True, True) for i in range(50)]
+    ordered = liquids + others
+    if not ordered:
+        ordered = [(f"TEST{i:03d}", f"샘플선박{i}", "", i % 3 == 0, True) for i in range(50)]
 
-    rows, seq = [], 1
-
-    # ① 액체화물선 — 전수. 한 척당 1~3건
-    for cs, vname, cat, liq, est in liquids:
+    rows, i, seq = [], 0, 1
+    facility_usage: dict[str, int] = {}
+    while len(rows) < TARGET_ROWS:
+        cs, vname, cat, liq, est = ordered[i % len(ordered)]
+        i += 1
         for _ in range(random.randint(1, 3)):
             cargo, un, _imdg, _pg, basis = pick_cargo(cat, liq, est)
-            facility = random.choice(LIQUID_FACILITIES if un else DRY_FACILITIES)
+            facility = _pick_facility(LIQUID_FACILITIES if un else DRY_FACILITIES, facility_usage)
             rows.append(make_row(cs, vname, cat, cargo, un, basis, facility, seq))
             seq += 1
 

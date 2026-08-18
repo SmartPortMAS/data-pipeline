@@ -163,51 +163,6 @@ INPRT_CAG_DCLR_INFO = {
 }
 
 # ---------------------------------------------------------------------------
-# 4. 선박 하역정보 (getUnloadRcdInfo) -> 하역 기록
-# ---------------------------------------------------------------------------
-UNLOAD_RCD_INFO = {
-    "source_table": "UnloadRcdInfo",
-    "stg_name": "upa_unload_record_stg.csv",
-    "column_map": {
-        "unloadRcdId": "unload_record_id",
-        "unloadPrtNm": "unload_port_name",
-        "unloadRcdDate": "unload_record_date",
-        "vslNm": "vessel_name",
-        "loadPrtNm": "load_port_name",
-        "prdctTypeCn": "product_type",
-        "blCagQtyCn": "bl_cargo_qty",
-        "norSbmsnDate": "nor_submission_at_utc",
-        "norAprvDate": "nor_approval_at_utc",
-        "unloadBgngDate": "unload_begin_at_utc",
-        "unloadCmptnDate": "unload_complete_at_utc",
-        "loadBgngDate": "load_begin_at_utc",
-        "loadCmptnDate": "load_complete_at_utc",
-        "jobRcdInfoCn": "job_record_info",
-        "rmrkInfoCn": "remark",
-        "regDt": "registered_at_utc",
-        "blNoCn": "bl_no",
-    },
-    "numeric_cols": [],
-    "utc_cols": [
-        "nor_submission_at_utc",
-        "nor_approval_at_utc",
-        "unload_begin_at_utc",
-        "unload_complete_at_utc",
-        "load_begin_at_utc",
-        "load_complete_at_utc",
-        "registered_at_utc",
-    ],
-    # 하역정보는 callsgn/voyage_no 가 없어 vessel_name + bl_no 로만 식별 가능
-    "key_cols": ["unload_record_id"],
-    # 날짜 순서 검증 쌍 (start, end)
-    "date_order_pairs": [
-        ("nor_submission_at_utc", "nor_approval_at_utc"),
-        ("unload_begin_at_utc", "unload_complete_at_utc"),
-        ("load_begin_at_utc", "load_complete_at_utc"),
-    ],
-}
-
-# ---------------------------------------------------------------------------
 # 5-1. 항만시설(부두) 현황 상세정보 (getGisBaseHrbrFcltDtlInfo) -> 부두
 # ---------------------------------------------------------------------------
 HRBR_FCLT_INFO = {

@@ -5,7 +5,7 @@ collect_portmis.py로 수집된 PORT-MIS 선박 입출항 원본 데이터를
 전처리하여 data/staging/ 에 CSV로 저장합니다.
 
 PORT-MIS 응답 컬럼 → 표준 컬럼 매핑:
-    prtAgCd          → port_agency_cd       (항만청 코드: 820=울산, 300=온산)
+    prtAgCd          → port_agency_cd       (항만청 코드: 820=울산)
     prtAgNm          → port_agency_nm       (항만청 명칭)
     etryptYear       → entry_year           (입항 연도)
     etryptCo         → entry_count          (입항 횟수: 연간 누적)
@@ -237,7 +237,7 @@ def preprocess_portmis():
     df["is_domestic_voyage"] = _prev_s.str.startswith("KR").astype("boolean")
 
     # 11. 항만청 이름 코드 기반으로 명시적 레이블링
-    port_cd_map = {"820": "울산항", "300": "온산항"}
+    port_cd_map = {"820": "울산항"}
     df["port_agency_label"] = (
         df["port_agency_cd"]
         .astype(str)
@@ -248,7 +248,6 @@ def preprocess_portmis():
     # 12. 요약 출력
     print(f"\n  전처리 후 행 수       : {len(df)}")
     print(f"  울산항 건수           : {(df['port_agency_cd'].astype(str) == '820').sum()}")
-    print(f"  온산항 건수           : {(df['port_agency_cd'].astype(str) == '300').sum()}")
     print(f"  액체화물선 건수       : {df['is_liquid_cargo_vessel'].sum()}")
     print(f"  국내 항로 건수        : {df['is_domestic_voyage'].sum()}")
     print(f"  키 결측(MISSING_KEY)  : {(df['quality_flag'] == 'MISSING_KEY').sum()}")

@@ -41,7 +41,6 @@ ENDPOINTS = {
     "vessel_nvgt":     ("VslNvgtInfoService/getVtsBaseVslNvgtInfo", "upa_vessel_nvgt"),
     "intg_cargo":      ("IntgCagInfoService/getIntgCagInfo", "upa_intg_cargo"),
     "inprt_cargo":     ("IntgCagInfoService/getInprtCagDclrInfo", "upa_inprt_cargo"),
-    "unload_record":   ("UnloadRcdInfoService/getUnloadRcdInfo", "upa_unload_record"),
     "berth_facility":  ("GisBaseHrbrFcltDtlInfoService/getGisBaseHrbrFcltDtlInfo", "upa_berth_facility"),
     "anchorage":       ("GisBaseHrbrFcltDtlInfoService/getGisBaseAnchrgDtlInfo", "upa_anchorage"),
 }
@@ -186,17 +185,6 @@ class UpaClient:
         print(f"[COLLECT] 선박위치 {len(items)}건")
         return self.save_raw(prefix, items)
 
-    def collect_unload_record(self, unload_prt_nm: str = None, vsl_nm: str = None) -> str:
-        ep, prefix = ENDPOINTS["unload_record"]
-        params = {}
-        if unload_prt_nm:
-            params["unloadPrtNm"] = unload_prt_nm
-        if vsl_nm:
-            params["vslNm"] = vsl_nm
-        items = self.fetch_all(ep, params)
-        print(f"[COLLECT] 하역정보 {len(items)}건")
-        return self.save_raw(prefix, items)
-
     def collect_berth_facility(self, prt_nm: str = None) -> str:
         ep, prefix = ENDPOINTS["berth_facility"]
         params = {"prtNm": prt_nm} if prt_nm else {}
@@ -335,7 +323,7 @@ def collect_and_preprocess(service_key: str = None, year: str = None,
                            cargo_targets: list = None):
     """
     실전 수집 흐름 예시.
-      1) 전체 조회형 4종 수집(선박위치/하역/부두/정박지)
+      1) 전체 조회형 3종 수집(선박위치/부두/정박지)
       2) 선박위치에서 callsgn 뽑아 운항정보 수집
       3) (선택) cargo_targets 가 있으면 화물정보 수집
       4) 전처리 실행 -> data/staging/*.csv
@@ -347,7 +335,6 @@ def collect_and_preprocess(service_key: str = None, year: str = None,
 
     # 1) 전체 조회형
     pos_path = client.collect_vessel_position()
-    client.collect_unload_record()
     client.collect_berth_facility()
     client.collect_anchorage()
 
@@ -366,7 +353,6 @@ def collect_and_preprocess(service_key: str = None, year: str = None,
     print("\n[PREPROCESS] staging 생성 시작")
     base = RAW_DIR
     upa.run_pipeline("vessel_position", [f"{base}/upa_vessel_position_raw.json"])
-    upa.run_pipeline("unload_record", [f"{base}/upa_unload_record_raw.json"])
     upa.run_pipeline("berth_facility", [f"{base}/upa_berth_facility_raw.json"])
     upa.run_pipeline("anchorage", [f"{base}/upa_anchorage_raw.json"])
     if os.path.exists(f"{base}/upa_vessel_nvgt_raw.json"):
