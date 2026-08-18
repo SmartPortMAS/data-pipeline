@@ -65,8 +65,18 @@ FROM (
     SELECT (SELECT count(*) FROM mart.dashboard_current)          AS dash_rows,
            (SELECT count(*) FROM mart.vessel_latest_position)     AS pos_rows,
            (SELECT count(*) FROM mart.weather_now)                AS weather_rows,
+           -- weather_now 는 "가장 최근 행"이 아니라 "풍속이 실제로 관측된 가장 최근
+           -- 행"을 집는다(2026-08-15 개정). 원천이 값 없이 시각만 있는 행을 계속
+           -- 보내기 때문이다. 풍속 소스도 항만기상 하나가 아니라 조위관측소·부이를
+           -- 포함하므로, 기준을 "세 소스에서 풍속이 있는 행의 최신 시각"으로 맞춘다.
            (SELECT weather_observed_at_utc FROM mart.weather_now)
-             = (SELECT max(observed_at_utc) FROM weather_obs)     AS weather_is_latest
+             = (SELECT max(t) FROM (
+                   SELECT max(observed_at_utc) AS t FROM weather_obs WHERE wind_speed_ms IS NOT NULL
+                   UNION ALL
+                   SELECT max(observed_at_utc)      FROM tide_obs    WHERE wind_speed_ms IS NOT NULL
+                   UNION ALL
+                   SELECT max(observed_at_utc)      FROM wave_obs    WHERE wind_speed1_ms IS NOT NULL
+               ) s)                                               AS weather_is_latest
 ) t;
 
 -- [검증 6] MMSI-First — 위치신호가 있는 선박은 callsgn 유무와 무관하게 전부 남는가
@@ -256,6 +266,27 @@ FROM (
              ON fa.source_name = pc.facility_name)                                   AS total_calls,
         (SELECT count(*) FROM upa_port_call pc JOIN mart.facility_alias fa
              ON fa.source_name = pc.facility_name WHERE fa.facility_type = 'BERTH')   AS berth_calls
+) t;
+
+-- ---------------------------------------------------------------------------
+-- [검증 14] weather_now — 풍속이 실제로 채워지는가 (기상 판정 가부의 전제)
+--   항만기상 원천은 값 없이 시각만 있는 행을 계속 보낸다(실측: 하루 24행 중
+--   풍속 0~6건). 풍속이 NULL 이거나 너무 오래되면 기상 에이전트가 전 선석을
+--   "판단불가"로 떨어뜨리므로, 세 소스 통합이 실제로 값을 채우고 있는지 본다.
+--   MAX_STALENESS(3시간, backend rule_engine)와 같은 기준으로 판정한다.
+SELECT '14. 기상 판정 입력(풍속)' AS check_name,
+       CASE WHEN wind_speed_ms IS NULL
+              THEN 'FAIL (풍속 NULL — 세 소스 모두 관측값 없음)'
+            WHEN age_min > 180
+              THEN 'WARN (풍속 ' || round(age_min) || '분 전 값 — 3시간 초과라 기상 판정이 판단불가로 떨어짐, 출처 '
+                   || COALESCE(wind_source, '?') || ')'
+            ELSE 'PASS (' || wind_speed_ms || ' m/s, ' || round(age_min) || '분 전, 출처 '
+                 || COALESCE(wind_source, '?') || '/' || COALESCE(wind_station_name, '?') || ')'
+       END AS result
+FROM (
+    SELECT wind_speed_ms, wind_source, wind_station_name,
+           EXTRACT(EPOCH FROM (now() - weather_observed_at_utc)) / 60 AS age_min
+    FROM mart.weather_now
 ) t;
 
 -- ---------------------------------------------------------------------------

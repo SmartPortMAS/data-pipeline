@@ -27,9 +27,17 @@ PORT-MIS 응답 필드 설명 (실제 API 검증 완료 기준):
     vsslNm           : 선박명
     vsslNltyCd       : 국적 코드 (KR=한국, 등)
     vsslNltyNm       : 국적 명칭
-    vsslKndCd        : 선종 코드 (52=화물/시멘트 등)
-    vsslKndNm        : 선종 명칭
-    etryptPurpsCd    : 입항 목적 코드 (03=하역 등)
+    vsslKndCd        : 선종 코드. 실측 대조(vsslKndNm 기준, 2026-08-15):
+                       51=원유운반선 52=석유제품 운반선 53=케미칼 운반선
+                       55=LPG 운반선 59=기타 유조선 / 26=시멘트운반선
+                       ※ 예전 주석에 "52=화물/시멘트"라고 적혀 있었으나 틀렸다.
+                          52 는 이 프로젝트의 주력 선종(석유제품 운반선)이고,
+                          시멘트는 26 이다. 코드 의미는 반드시 같은 행의 이름
+                          컬럼(vsslKndNm)과 대조할 것 — prtAgCd 오인과 같은 실패다.
+    vsslKndNm        : 선종 명칭 ← 코드 의미를 검증할 때 이 컬럼을 본다
+    etryptPurpsCd    : 입항 목적 코드. 실측 대조(etryptPurpsNm 기준):
+                       1=양적하 2=양하 3=적하 8=급유 10=단순경유 99=기타
+                       ※ 예전 주석의 "03=하역"은 부정확하다(3 은 '적하').
     etryptPurpsNm    : 입항 목적 명칭
     frstDpmprtNatPrtCd : 최초 출발항 국가+항만 코드 (예: KRPUS=한국부산)
     frstDpmprtPrtNm    : 최초 출발항 명칭

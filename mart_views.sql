@@ -184,6 +184,52 @@ CREATE TABLE IF NOT EXISTS upa_cargo_manifest (
 );
 
 -- ---------------------------------------------------------------------------
+-- 0-A2. upa_berth_facility — 선석 제원 마스터 (facility_alias 가 정본으로 참조)
+--
+-- ★ 왜 여기 껍데기가 필요한가 (2026-08-12 실측 확인)
+--   이 테이블은 UPA 부두현황 API(getGisBaseHrbrFcltDtlInfo)로 채워지는데,
+--   그 수집은 run_pipeline.DOMAINS 8종(tide/wave/weather/weather_forecast/
+--   vessel/port_call/portmis/mart)에 **들어 있지 않다** — collect_berth_facility()
+--   를 따로 호출해야 생긴다.
+--
+--   그래서 표준 순서(alembic upgrade head → run_pipeline all → psql -f
+--   mart_views.sql)를 그대로 따르면 이 테이블이 없고, 아래 mart.facility_alias 의
+--   CREATE MATERIALIZED VIEW 가 참조 테이블 부재로 실패한다. PostgreSQL 은 뷰
+--   생성 시점에 참조 테이블 "존재"를 검사하므로, 파일 앞쪽에서 죽으면
+--   **뒤따르는 뷰 10종이 하나도 안 만들어진다**. 실측 재현:
+--       ERROR: relation "upa_berth_facility" does not exist   → mart 뷰 0개
+--
+--   바로 위 upa_cargo_manifest 껍데기와 정확히 같은 이유·같은 처방이다.
+--   실데이터가 이미 적재돼 있으면 이 구문은 아무 일도 하지 않는다.
+--
+--   ※ 껍데기만 있는 상태에서는 facility_alias 의 master CTE 가 0행이 되어 자동
+--     매칭이 전부 UNMAPPED 로 떨어진다. 그건 "부두 제원을 아직 안 받았다"는
+--     사실의 정확한 반영이지 조용한 오작동이 아니다 — 검증 13 이 그 상태를
+--     드러낸다. 선석 매칭을 실제로 쓰려면 collect_berth_facility() 를 한 번
+--     돌려야 한다.
+--
+-- 컬럼 구성은 upa_config.HRBR_FCLT_INFO.column_map 과 1:1 (적재 시 스키마 불일치 방지).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS upa_berth_facility (
+    port_name            text,
+    wharf_name           text,          -- ★ facility_alias 매칭의 정본 컬럼
+    length_m             double precision,
+    depth_m              double precision,
+    berth_capacity       double precision,
+    berth_vessel_count   double precision,
+    unload_capacity      double precision,
+    handling_cargo_name  text,
+    wharf_se_name        text,
+    latitude             double precision,
+    longitude            double precision,
+    port_operator_name   text,
+    source_system        text,
+    source_table         text,
+    collected_at_utc     timestamptz,
+    quality_flag         text
+);
+
+-- ---------------------------------------------------------------------------
 -- 0-B. mart.facility_alias — 시설명 정규화 매핑 (P1 처방)
 --
 -- ★ 문제 — 실측(2026-08-11, upa_port_call 재수집 후)
@@ -665,16 +711,39 @@ pc_latest AS (
     WHERE callsgn IS NOT NULL
     ORDER BY upper(trim(callsgn)), arrival_at_utc DESC
 ),
-cargo_sum AS (
-    SELECT upper(trim(callsgn))            AS callsgn,
-           count(*)                        AS cargo_item_count,
-           count(DISTINCT bl_no)           AS bl_count,
-           count(*) FILTER (WHERE dg_un_no IS NOT NULL)        AS dg_cargo_count,
-           string_agg(DISTINCT dg_un_no::text, ',')            AS dg_un_nos,
-           string_agg(DISTINCT cargo_name_raw, ' | ')          AS cargo_names
+-- 화물은 '최신 항차' 것만 센다.
+--
+-- 예전에는 callsgn 하나로만 GROUP BY 해서 그 배의 모든 항차 화물을 합산했다.
+-- 바로 위 pm_latest·pc_latest 는 DISTINCT ON 으로 최신 입항 1건만 남기는데,
+-- 화물만 과거 항차까지 합쳐 그 1건에 붙는 구조였다.
+-- 실측(2026-08-15): 항차가 2개 이상인 선박 280척, 총 848항차, 최대 6항차.
+--
+-- 결과적으로 dashboard_current.dg_un_nos 를 통해 **지금 싣고 있지 않은 위험물**이
+-- 관제 화면에 표시됐다. 혼재 판정의 입력이 되는 값이라 그냥 두면 없는 위험을
+-- 만들어내는 셈이다.
+--
+-- 항차 자연키(ptent_yr, voyage_no)는 두 컬럼 모두 이미 적재되어 있다(bigint).
+latest_voyage AS (
+    SELECT DISTINCT ON (upper(trim(callsgn)))
+           upper(trim(callsgn)) AS callsgn, ptent_yr, voyage_no
     FROM upa_cargo_manifest
     WHERE callsgn IS NOT NULL
-    GROUP BY upper(trim(callsgn))
+    ORDER BY upper(trim(callsgn)), ptent_yr DESC NULLS LAST, voyage_no DESC NULLS LAST
+),
+cargo_sum AS (
+    SELECT upper(trim(cm.callsgn))         AS callsgn,
+           count(*)                        AS cargo_item_count,
+           count(DISTINCT cm.bl_no)        AS bl_count,
+           count(*) FILTER (WHERE cm.dg_un_no IS NOT NULL)     AS dg_cargo_count,
+           string_agg(DISTINCT cm.dg_un_no::text, ',')         AS dg_un_nos,
+           string_agg(DISTINCT cm.cargo_name_raw, ' | ')       AS cargo_names
+    FROM upa_cargo_manifest cm
+    JOIN latest_voyage lv
+      ON lv.callsgn = upper(trim(cm.callsgn))
+     AND lv.ptent_yr IS NOT DISTINCT FROM cm.ptent_yr
+     AND lv.voyage_no IS NOT DISTINCT FROM cm.voyage_no
+    WHERE cm.callsgn IS NOT NULL
+    GROUP BY upper(trim(cm.callsgn))
 )
 SELECT
     pm.callsgn,
@@ -856,15 +925,54 @@ LEFT JOIN mart.msds_flat ms
 --    한 테이블만 비어도 대시보드 환경 컬럼 전체가 사라진다).
 --    울산 단일 관측 지점 전제 — 다지점 수집으로 바뀌면 station_id 필터 추가.
 -- ---------------------------------------------------------------------------
+--
+-- [2026-08-15 개정] "가장 최근 행"이 아니라 "그 지표가 실제로 관측된 가장 최근 행"
+--
+--   항만기상(MMAF openWeatherNow · 울산항동방파제서단등대)은 관측값 칸이 빈 행을
+--   시각만 채워 매시간 보낸다. 실측: 최근 8일 중 하루 24행 가운데 풍속이 들어있는
+--   행은 0~6건뿐이었다. 최신 행 하나만 집으면 wind_speed_ms 가 NULL 이 되고,
+--   소비하는 쪽은 그걸 "실데이터 없음"으로 보고 mock 기상으로 넘어간다 —
+--   실관측이 있는데도 대시보드가 가짜 기상을 띄우게 된다.
+--
+--   풍속은 한 소스만 보지 않는다. 조위관측소(KHOA)와 부이(KMA)도 풍속을 함께
+--   보내고, 실측상 이쪽이 훨씬 촘촘하다 (조위 1,803행 전부 / 부이 250행 전부 /
+--   항만기상 248행 중 33건). 세 소스를 합쳐 그중 가장 최근 관측을 쓴다.
+--   기상 판정(하역중단 등)은 풍속 신선도에 직접 걸리므로 이 차이가 곧 판정 가부다.
+--
+--   값이 오래됐다는 사실은 숨기지 않는다 — weather_observed_at_utc 가 그 풍속이
+--   실제로 측정된 시각이라 소비하는 쪽이 신선도를 그대로 판단할 수 있다.
+--   어느 관측소에서 온 값인지도 wind_source/wind_station_name 으로 드러낸다.
+--
 CREATE OR REPLACE VIEW mart.weather_now AS
+WITH wind_all AS (
+    -- 항만기상에는 돌풍 컬럼이 스키마상 없다 (결측이 아니라 미제공)
+    SELECT observed_at_utc, wind_speed_ms, wind_dir_deg,
+           NULL::double precision AS gust_ms,
+           station_name, 'MMAF_PORT'::text AS wind_source
+      FROM weather_obs WHERE wind_speed_ms IS NOT NULL
+    UNION ALL
+    SELECT observed_at_utc, wind_speed_ms, wind_dir_deg, gust_ms,
+           station_name, 'KHOA_TIDE'
+      FROM tide_obs WHERE wind_speed_ms IS NOT NULL
+    UNION ALL
+    -- 부이는 풍향·풍속 센서가 2조다 (1번이 주센서, 2번은 예비)
+    SELECT observed_at_utc, wind_speed1_ms, wind_dir1_deg, gust1_ms,
+           station_name, 'KMA_BUOY'
+      FROM wave_obs WHERE wind_speed1_ms IS NOT NULL
+),
+w   AS (SELECT * FROM wind_all ORDER BY observed_at_utc DESC LIMIT 1),
+wa  AS (SELECT * FROM weather_obs WHERE air_temp_c        IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+wvi AS (SELECT * FROM weather_obs WHERE visibility_m      IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+t   AS (SELECT * FROM tide_obs    WHERE tide_level_cm     IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1),
+v   AS (SELECT * FROM wave_obs    WHERE wave_height_sig_m IS NOT NULL ORDER BY observed_at_utc DESC LIMIT 1)
 SELECT
     w.observed_at_utc      AS weather_observed_at_utc,
     w.wind_dir_deg,
     w.wind_speed_ms,
-    w.air_temp_c,
-    w.humidity_pct,
-    w.air_pressure_hpa,
-    w.visibility_m,
+    wa.air_temp_c,
+    wa.humidity_pct,
+    wa.air_pressure_hpa,
+    wvi.visibility_m,
     t.observed_at_utc      AS tide_observed_at_utc,
     t.tide_level_cm,
     t.sea_temp_c,
@@ -876,15 +984,21 @@ SELECT
     v.wave_dir_deg,
     -- ↓ 실무 반영 추가 (CREATE OR REPLACE 제약상 맨 뒤에 붙인다)
     --   돌풍(gust): 계류삭 장력은 평균풍속이 아니라 순간최대풍속에 끊어진다.
+    --     풍속과 같은 관측에서 온 값이어야 짝이 맞으므로 풍속 소스에서 함께 가져온다.
     --   조류(current): 액체부두 접·이안에서 조류는 풍속만큼 중요한 제약이다.
     --     특히 울산 본항·온산 수로는 창·낙조류 방향이 접안 조종에 직접 영향.
-    t.gust_ms,
+    w.gust_ms,
     t.current_speed_cms,
-    t.current_dir_deg
+    t.current_dir_deg,
+    -- 풍속 출처 (맨 뒤 추가) — 관제사·리뷰어가 "어느 관측소 값인가"를 알 수 있어야 한다
+    w.wind_source,
+    w.station_name         AS wind_station_name
 FROM (SELECT 1) AS anchor
-LEFT JOIN (SELECT * FROM weather_obs ORDER BY observed_at_utc DESC LIMIT 1) w ON TRUE
-LEFT JOIN (SELECT * FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1) t ON TRUE
-LEFT JOIN (SELECT * FROM wave_obs ORDER BY observed_at_utc DESC LIMIT 1) v ON TRUE;
+LEFT JOIN w   ON TRUE
+LEFT JOIN wa  ON TRUE
+LEFT JOIN wvi ON TRUE
+LEFT JOIN t   ON TRUE
+LEFT JOIN v   ON TRUE;
 
 -- ---------------------------------------------------------------------------
 -- 5-1. mart.berth_draught_check — 조위 반영 가용수심 · UKC 판정
@@ -955,11 +1069,17 @@ berth AS (
         ('S-Oil 1부두',  11.0), ('S-Oil 2부두',  15.5), ('S-Oil 3부두',  14.0),
         ('S-Oil 4부두',  12.0), ('정일1부두',    11.0), ('정일2부두',    12.5),
         -- 울산신항
-        ('정일스톨트헤븐 신항 3~5부두', 14.0),
-        ('현대오일터미널 신항부두',     14.0),
-        ('LS니꼬 신항부두',             14.0),
-        ('UTK 신항부두',                14.0)
-    ) AS t(facility_name, chart_depth_m)
+        -- 이름은 mart.facility_alias.wharf_name(마스터 표기)과 정확히 같아야 한다.
+        -- 예전엔 '정일스톨트헤븐 신항 3~5부두'처럼 3개 선석을 한 줄로 묶어 적었는데
+        -- 마스터에는 3·4·5부두가 각각 별도 선석이라 하나도 붙지 않았다.
+        ('정일스톨트헤븐 울산신항3부두', 14.0),
+        ('정일스톨트헤븐 울산신항4부두', 14.0),
+        ('정일스톨트헤븐 울산신항5부두', 14.0),
+        ('현대오일터미널 신항1부두',     14.0),
+        ('현대오일터미널 신항2부두',     14.0),
+        ('LS MNM 신항부두',              14.0),
+        ('UTK 신항부두',                 14.0)
+    ) AS t(wharf_name, chart_depth_m)
 ),
 vessel AS (
     SELECT DISTINCT ON (upper(btrim(callsgn)))
@@ -1003,12 +1123,25 @@ SELECT
     v.received_at_utc                                   AS draught_observed_at_utc,
     pc.arrival_at_utc
 FROM pc
+-- ★ 선석 이름은 반드시 mart.facility_alias 를 거친다.
+--   pc.facility_name 은 VTS 원문('S-OIL1부두'·'SK1부두 11'·'OTK부두')이고 위 수심표는
+--   마스터 표기('S-Oil 1부두'·'SK1부두'·'OTK1부두')다. 예전에는 이 둘을 문자열
+--   완전일치로 붙여서 액체화물 전용부두가 통째로 안 맞았다.
+--   실측(2026-08-15): 판정 414건 중 UNKNOWN 387건 = 93.5%.
+--   0-B절이 바로 이 문제 때문에 facility_alias 를 만들었는데 이 뷰만 안 거치고 있었다.
+--
+--   더 나쁜 점은 조용했다는 것이다 — safety_index 의 '흘수 여유' 축이 UNKNOWN 을
+--   분모에서 빼기 때문에, 27건만 보고 98점을 내며 93.5%를 못 본 사실이 화면에
+--   드러나지 않았다.
+--
 -- ★ LEFT JOIN 이어야 한다. INNER JOIN 이면 위 berth 목록에 없는 부두(제원 미확보,
 --   부이, 신규 부두)에 접안한 선박이 판정 결과에서 통째로 사라진다. 그러면
 --   "위험하지 않다"가 아니라 "아예 안 보인다"가 되어 UNIDENTIFIED·NO_SIGNAL 을
 --   살려둔 이 프로젝트 원칙과 정면으로 어긋난다.
 --   목록에 없으면 chart_depth_m 이 NULL 이 되고 draught_verdict 는 'UNKNOWN' 이다.
-LEFT JOIN berth  b ON b.facility_name = pc.facility_name
+LEFT JOIN mart.facility_alias fa
+       ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
+LEFT JOIN berth  b ON b.wharf_name = fa.wharf_name
 LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
@@ -1261,3 +1394,50 @@ SELECT DISTINCT
 FROM in_port ip
 JOIN mart.cargo_msds cm ON cm.callsgn = ip.callsgn
 WHERE cm.dg_un_no IS NOT NULL;   -- 위험물 화물만 (혼재금지 판정 대상)
+
+
+-- ---------------------------------------------------------------------------
+-- 11. mart.berth_dwell_stats   선석별 재항 소요시간 실측 통계
+--     (upa_port_call 완료 건: 입항 ~ 출항 실측 29,607건 기준)
+--
+-- 왜 필요한가: 스케줄링 에이전트가 지금까지 답할 수 있는 것은 "이 선석이
+-- 점유인가 여유인가" 둘뿐이었다. 그런데 관제사가 실제로 묻는 것은 "그럼
+-- 언제 비는가"다. 그 답이 없으면 '배정'은 되지만 '스케줄링'은 되지 않는다.
+--
+-- 출항 예정 시각(ETD)이 있으면 그걸 쓰는 게 맞지만, portmis_vessel.
+-- departure_sched_utc 는 779행 전부 비어 있다(2026-08-18 실측 — 원천 API 가
+-- 이 필드를 주지 않는다). 대신 우리에게는 실제로 몇 시간 머물렀는지가
+-- 3만 건 가까이 쌓여 있으므로, 그 분포에서 추정한다.
+--
+-- 평균이 아니라 중앙값(P50)을 대표값으로 쓴다. 재항시간은 꼬리가 매우 길어
+-- (장생포호안 평균 127h vs 중앙값 39h) 평균은 몇 건의 장기 계류에 끌려간다.
+-- P90 을 함께 내보내 "보통 이 정도, 길면 이 정도"를 화면이 같이 말할 수 있게 한다.
+--
+-- 주의 — 이 값은 '하역 시간'이 아니라 '재항 시간'이다. 접안 대기·검사·급유가
+-- 모두 포함돼 있어 실제 하역 작업시간보다 길다. 화면은 이 값을 '하역 소요'가
+-- 아니라 '재항 소요(해제까지)'로 표기해야 한다.
+--
+-- 표본이 5건 미만인 선석은 내보내지 않는다 — 한두 건으로 만든 중앙값을
+-- 화면이 예측처럼 보여주면 근거 없는 숫자가 된다(모르면 말하지 않는다).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.berth_dwell_stats AS
+SELECT fa.wharf_name,
+       count(*)                                                   AS sample_count,
+       round((percentile_cont(0.5) WITHIN GROUP (
+           ORDER BY EXTRACT(EPOCH FROM (pc.departure_at_utc - pc.arrival_at_utc)) / 3600.0
+       ))::numeric, 1)                                            AS median_hours,
+       round((percentile_cont(0.9) WITHIN GROUP (
+           ORDER BY EXTRACT(EPOCH FROM (pc.departure_at_utc - pc.arrival_at_utc)) / 3600.0
+       ))::numeric, 1)                                            AS p90_hours,
+       max(pc.departure_at_utc)                                   AS latest_sample_utc
+FROM upa_port_call pc
+JOIN mart.facility_alias fa
+  ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
+WHERE pc.arrival_at_utc IS NOT NULL
+  AND pc.departure_at_utc IS NOT NULL
+  AND pc.departure_at_utc > pc.arrival_at_utc
+  -- 30일을 넘는 건은 계선(장기 정박)으로 보고 뺀다. 하역 회전과 성격이 달라
+  -- 같이 섞으면 중앙값이 위로 끌려간다.
+  AND pc.departure_at_utc - pc.arrival_at_utc < INTERVAL '30 days'
+GROUP BY fa.wharf_name
+HAVING count(*) >= 5;

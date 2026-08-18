@@ -55,6 +55,14 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data_pipeline.reference import imdg_dgl  # noqa: E402
 
+# DB 접속정보(.env)를 읽는다. 없으면 _read_db 가 staging 으로 조용히 폴백한다.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+except ImportError:
+    pass
+
 random.seed(20260727)
 STAGING = os.path.join("data", "staging")
 SHARE_DIR = "samples"
@@ -64,7 +72,9 @@ OUT_PIPELINE = os.path.join(STAGING, "upa_cargo_manifest_stg.csv")
 OUT_V3 = os.path.join(SHARE_DIR, "upa_cargo_manifest_stg_v3_synthetic.csv")
 OUT_SCENARIO = os.path.join(SHARE_DIR, "violation_scenarios.csv")
 OUT_WEATHER = os.path.join(SHARE_DIR, "violation_weather_obs_synthetic.csv")
-TARGET_ROWS = 365
+# 액체화물선은 전수 배정하므로 총 행 수는 선박 수에 따라 정해진다(고정 목표 없음).
+# 일반화물선은 표본이라 최소 이만큼만 채운다 — 혼재 판정 대상이 아니라서 전수가 필요 없다.
+DRY_SAMPLE_MIN = 60
 
 # ---------------------------------------------------------------------------
 # 스키마 정본 — mart_views.sql 의 CREATE TABLE upa_cargo_manifest 와 1:1 일치.
@@ -307,8 +317,42 @@ STALE_CATEGORY_MARKERS = {
 # 공통 유틸
 # ===========================================================================
 def _read(name):
+    """staging CSV 를 읽는다. 없으면 None.
+
+    staging 은 **직전 1회 수집분**이다(수집기가 매시 덮어쓴다). 누적 이력이 필요한
+    곳은 _read_db 를 쓴다 — 아래 주석 참고.
+    """
     p = os.path.join(STAGING, name)
     return pd.read_csv(p, encoding="utf-8-sig") if os.path.exists(p) else None
+
+
+def _read_db(sql):
+    """로컬 DB 에서 읽는다. 접속이 안 되면 None (staging 폴백).
+
+    [2026-08-15 — 왜 DB 도 보게 했나]
+    선박 목록을 staging 에서만 만들면 그 시각에 수집된 배만 화물을 받는다.
+    실측: staging PORT-MIS 130행(액체화물선 103) vs DB 누적 682행(액체화물선 403,
+    고유 277척). 즉 staging 만 보면 액체화물선의 3분의 1 정도만 덮인다.
+
+    화물 배정의 근거는 "그 배의 선종"이지 "이번 수집에 잡혔는지"가 아니므로,
+    누적된 선종 정보를 쓰는 편이 맞다. DB 가 없는 환경(수집 전용 EC2 등)에서는
+    조용히 staging 으로 돌아간다 — 그쪽은 DB 에 접속하지 않는 것이 설계다.
+    """
+    try:
+        from sqlalchemy import create_engine
+        url = os.getenv("DATABASE_URL")
+        if not url:
+            host = os.getenv("POSTGRES_HOST"); port = os.getenv("POSTGRES_PORT")
+            db = os.getenv("POSTGRES_DB"); user = os.getenv("POSTGRES_USER")
+            pw = os.getenv("POSTGRES_PASSWORD")
+            if not all([host, port, db, user, pw]):
+                return None
+            url = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
+        url = url.replace("+asyncpg", "+psycopg2")
+        return pd.read_sql(sql, create_engine(url))
+    except Exception as e:
+        print(f"  (DB 조회 불가 - staging 으로 진행: {str(e)[:70]})")
+        return None
 
 
 def check_staging_freshness(pm, allow_stale: bool = False):
@@ -358,8 +402,18 @@ def build_vessel_pool(allow_stale: bool = False):
     estimated=True 로 표시한다(화물도 추정 폴백에서 배정).
     """
     pool = []
-    pm = _read("portmis_vessel_stg.csv")
-    check_staging_freshness(pm, allow_stale)
+    # 선종은 누적 정보라 DB 를 우선 본다(없으면 staging). 신선도 검사는 staging 기준
+    # 으로만 의미가 있으므로 그대로 둔다 — 수집이 멈췄는지 알려주는 장치다.
+    pm_stg = _read("portmis_vessel_stg.csv")
+    check_staging_freshness(pm_stg, allow_stale)
+    pm = _read_db(
+        "SELECT DISTINCT ON (callsgn) callsgn, vessel_name, ship_kind_category,"
+        " is_liquid_cargo_vessel FROM portmis_vessel"
+        " WHERE callsgn IS NOT NULL AND btrim(callsgn) <> ''"
+        " ORDER BY callsgn, collected_at_utc DESC"
+    )
+    if pm is None:
+        pm = pm_stg
     if pm is not None and "callsgn" in pm.columns:
         pm = pm.dropna(subset=["callsgn"]).drop_duplicates(subset=["callsgn"])
         for _, r in pm.iterrows():
@@ -369,7 +423,13 @@ def build_vessel_pool(allow_stale: bool = False):
             liq = str(r.get("is_liquid_cargo_vessel", "")).lower() == "true"
             cat = str(r.get("ship_kind_category", "") or "")
             pool.append((cs, str(r.get("vessel_name", "") or ""), cat, liq, False))
-    upa = _read("upa_vessel_position_stg.csv")
+    upa = _read_db(
+        "SELECT DISTINCT ON (callsgn) callsgn, vessel_name FROM upa_vessel_position"
+        " WHERE callsgn IS NOT NULL AND btrim(callsgn) <> ''"
+        " ORDER BY callsgn, received_at_utc DESC"
+    )
+    if upa is None:
+        upa = _read("upa_vessel_position_stg.csv")
     if upa is not None and "callsgn" in upa.columns:
         have = {c for c, _, _, _, _ in pool}
         u = upa.dropna(subset=["callsgn"]).drop_duplicates(subset=["callsgn"])
@@ -455,6 +515,24 @@ def make_row(callsgn, vessel_name, cat, cargo, un_no, basis, facility, seq):
 # v2 — 정상 케이스 (WBS 1.5)
 # ===========================================================================
 def build_v2(pool):
+    """정상 케이스. **액체화물선은 한 척도 빠짐없이** 화물을 갖는다.
+
+    [2026-08-15 개정 — 왜 행 수 목표를 버렸나]
+    예전에는 TARGET_ROWS(365행)를 채울 때까지만 선박 목록을 돌았다. 그러면 앞쪽
+    선박만 화물을 받고 뒤쪽은 빈손으로 남는데, 그 경계에 아무 의미가 없다 —
+    같은 '석유제품 운반선'인데 목록 순서 때문에 한 척은 화물이 있고 한 척은 없다.
+
+    실측(2026-08-15): PORT-MIS 액체화물선 277척 중 화물이 배정된 건 98척뿐이었고,
+    화면에서는 "액체화물선인데 뭘 싣는지 모르는 배"로 보였다. 합성 데이터를 쓰기로
+    한 이상 같은 선종을 다르게 대할 근거가 없다.
+
+    그래서 기준을 "행 수"에서 "선박 커버리지"로 바꿨다. 액체화물선 전원에게 1~3건을
+    배정하고, 일반화물선은 표본 성격이므로 종전처럼 일부만 채운다(혼재 판정 대상이
+    아니라서 전수가 필요 없다).
+
+    배정 근거(cargo_basis)와 IMDG 참조표 교차검증은 그대로다 — 커버리지를 늘린 것이지
+    근거를 느슨하게 한 것이 아니다.
+    """
     liquids = [v for v in pool if v[3]]
     others = [v for v in pool if not v[3]]
     ordered = liquids + others
@@ -471,8 +549,16 @@ def build_v2(pool):
             facility = _pick_facility(LIQUID_FACILITIES if un else DRY_FACILITIES, facility_usage)
             rows.append(make_row(cs, vname, cat, cargo, un, basis, facility, seq))
             seq += 1
-            if len(rows) >= TARGET_ROWS:
-                break
+
+    # ② 일반화물선 — 표본만. 혼재 판정 대상이 아니라 전수가 필요 없고,
+    #    액체화물 관제 화면에서 비중이 커지면 오히려 주제가 흐려진다.
+    dry_quota = max(DRY_SAMPLE_MIN, len(rows) // 4)
+    for cs, vname, cat, liq, est in others[:dry_quota]:
+        cargo, un, _imdg, _pg, basis = pick_cargo(cat, liq, est)
+        facility = random.choice(LIQUID_FACILITIES if un else DRY_FACILITIES)
+        rows.append(make_row(cs, vname, cat, cargo, un, basis, facility, seq))
+        seq += 1
+
     return rows
 
 
@@ -747,9 +833,9 @@ def main():
     print(f"  DGL 검증      : 통과 (UN↔화물명 정합 {len(liq)}행)")
     _todo = imdg_dgl.unverified_entries()
     if _todo:
-        print(f"  ※ DGL 참조표 {len(_todo)}종은 아직 IMDG Code 원문 미대조 — "
+        print(f"  ※ DGL 참조표 {len(_todo)}종은 아직 IMDG Code 원문 미대조 - "
               f"py -m data_pipeline.checks.check_dgl_consistency 로 MSDS 대조 가능")
-    print(f"  키 출처       : {src} — 실선종 확인 {n_real}척 / 전체 {len(pool)}척")
+    print(f"  키 출처       : {src} - 실선종 확인 {n_real}척 / 전체 {len(pool)}척")
     print(f"  위험물 화물   : {len(liq)}행 (UN번호 有)")
     print(f"  화물 배정근거 : 실선종 {len(real_basis)}행 / 추정 {len(df_v3) - len(real_basis)}행")
     print()
@@ -757,9 +843,15 @@ def main():
     for s in scenarios:
         print(f"    {s['violation_id']:<10} {s['violation_type']:<20} → {s['expected_judgement']}")
     print()
-    print("  ※ 전 행 is_synthetic=True — 실데이터 아님. bl_no/수량은 합성값이며")
+    print("  ※ 전 행 is_synthetic=True - 실데이터 아님. bl_no/수량은 합성값이며")
     print("    화물 대분류만 PORT-MIS 실신고 선종에 근거함(cargo_basis 참고).")
 
+
+# 이 스크립트는 CP949 콘솔(윈도우 기본)에서 돌아간다. 진단 출력에 em-dash 같은
+# 문자가 하나만 섞여도 UnicodeEncodeError 로 죽고, 하필 생성이 끝난 뒤라 결과 요약만
+# 못 보게 된다. 출력 단계에서 인코딩을 UTF-8 로 바꿔 그 함정을 없앤다.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 if __name__ == "__main__":
     main()
