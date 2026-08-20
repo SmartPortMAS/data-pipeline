@@ -191,11 +191,21 @@ def upsert_dataframe(
     return len(df)
 
 
-def load_csv(engine: Engine, csv_path: str, table: str, unique_cols: list, auto_create: bool = True) -> int:
+def load_csv(
+    engine: Engine, csv_path: str, table: str, unique_cols: list,
+    auto_create: bool = True, row_filter=None,
+) -> int:
     df = pd.read_csv(csv_path)
     if df.empty:
         print(f"[SKIP] {csv_path} empty")
         return 0
+    # 적재 직전 행 필터 — 원천(수집기)이 이미 고쳐졌지만 배포가 늦어 옛 산출물이
+    # 계속 내려오는 기간에, 잘못된 행이 DB로 재유입되는 것을 막는 방어선.
+    if row_filter is not None:
+        df = row_filter(df)
+        if df.empty:
+            print(f"[SKIP] {csv_path} 필터 후 0행")
+            return 0
     for col in df.columns:
         if col.endswith("_utc"):
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
@@ -210,7 +220,9 @@ def load_csv(engine: Engine, csv_path: str, table: str, unique_cols: list, auto_
     return n
 
 
-def load_all(table_map: dict, staging_dir: str = STAGING_DIR, auto_create: bool = True) -> None:
+def load_all(
+    table_map: dict, staging_dir: str = STAGING_DIR, auto_create: bool = True, row_filter=None,
+) -> None:
     """staging 폴더의 CSV 를 table_map 에 맞춰 PostgreSQL 에 적재한다.
 
     Args:
@@ -227,5 +239,5 @@ def load_all(table_map: dict, staging_dir: str = STAGING_DIR, auto_create: bool 
         if not entry:
             continue  # table_map 에 없는 파일은 건너뜀
         table, unique_cols = entry
-        total += load_csv(engine, csv_path, table, unique_cols, auto_create)
+        total += load_csv(engine, csv_path, table, unique_cols, auto_create, row_filter=row_filter)
     print(f"[DONE] 총 {total} rows 적재 완료")
