@@ -12,8 +12,18 @@ data/raw/portmis/ 에 저장합니다.
 사용법:
     python data_pipeline/collectors/portmis_collector.py [--start YYYYMMDD] [--end YYYYMMDD]
 
-    --start : 조회 시작일. 기본값: 오늘
+    --start : 조회 시작일. 생략하면 "자동 이어붙이기"(아래 설명) — 오늘이 아니다.
     --end   : 조회 종료일. 기본값: 오늘
+
+    (2026-08-19) --start를 생략하면 마지막으로 수집해 둔 raw 파일의 종료일부터 자동으로
+    이어서 수집한다 — 매번 날짜를 손으로 갱신하지 않아도 "그날그날 새로 입항한 것만"
+    누적된다. 별도 체크포인트 파일을 두지 않고, data/raw/portmis/ 안의 기존 파일명
+    (portmis_vessel_<start>_<end>.json) 자체를 이력으로 쓴다 — 그 디렉터리에 있는 모든
+    end_date 중 최댓값을 다음 시작일로 삼는다. 이력이 전혀 없으면(최초 실행) 오늘부터
+    시작한다. 이어붙일 때 마지막 종료일을 **하루 겹쳐서** 다시 수집한다 — 그날 오전에
+    수집이 돌았는데 오후에 추가로 입항 신고가 들어온 경우를 놓치지 않기 위해서다.
+    portmis_pg_loader가 자연키(callsgn+entry_year+entry_count)로 upsert하므로 겹쳐
+    수집해도 중복 행이 쌓이지 않는다 — 안전하게 겹칠 수 있다.
 
 출력:
     data/raw/portmis/portmis_vessel_<YYYYMMDD>_<YYYYMMDD>.json
@@ -56,6 +66,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import json
 import os
+import re
 import datetime
 import argparse
 
@@ -79,6 +90,77 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 RAW_PORTMIS_DIR = os.path.join(BASE_DIR, "data", "raw", "portmis")
 
 MAX_ROWS_PER_PAGE = 100  # API 최대 허용 건수 (페이징)
+
+_RAW_FILENAME_RE = re.compile(r"^portmis_vessel_(\d{8})_(\d{8})\.json$")
+
+# ---------------------------------------------------------------------------
+# <item> 아래 <details><detail>...</detail><detail>...</detail></details> 파싱
+# (2026-08-20 신설)
+#
+# 예전엔 `{child.tag: child.text for child in item}`로 item의 "직계 자식"만
+# 평탄화했다. <details>도 직계 자식이라 걸리긴 하는데, ElementTree에서 자식
+# 엘리먼트가 있는 태그의 `.text`는 "여는 태그 다음, 첫 자식 앞"의 공백 문자열일
+# 뿐이다 — 그래서 `details`는 항상 `"\n    "` 같은 빈 문자열로만 잡히고, 그 안의
+# 실제 값(입출항 실측 시각, 공식 배정 계선시설, 출항예정시각, 화물톤수, 예선/도선
+# 여부, 승무원 수, 선박대리점 등 이벤트당 20여 개 필드)은 통째로 버려지고 있었다
+# — raw XML을 직접 열어 재현·확인함(2026-08-20).
+#
+# <detail> 하나는 "입항" 아니면 "출항" 이벤트 하나를 나타낸다(<etryndNm> 값으로
+# 구분). 같은 태그명(예: laidupFcltyCd)이 입항/출항 양쪽에 다 나오므로, 어느
+# 이벤트인지 접두어로 구분해서 평탄화한다 — arrival_etryptDt(실제 입항시각),
+# departure_tkoffDt(실제 출항시각) 등. 흥미로운 점: 입항 detail 안에
+# tkoffPrrrnDt(출항 "예정" 시각)가 이미 들어있다 — 즉 배가 들어오는 순간 이미
+# 출항 예정시각을 선사가 신고한다(다만 실측 출항시각과 다를 수 있는 "예정"값).
+# 아직 출항 전인 항차는 <detail>이 입항 1개뿐일 수 있다.
+# ---------------------------------------------------------------------------
+_ETRYND_PREFIX = {"입항": "arrival_", "출항": "departure_"}
+
+
+def _parse_details(details_el) -> dict:
+    """<details> 하위 <detail>(입항/출항 이벤트별)을 arrival_/departure_ 접두로 평탄화."""
+    out: dict = {}
+    if details_el is None:
+        return out
+    for detail_el in details_el.findall("detail"):
+        etryndnm_el = detail_el.find("etryndNm")
+        prefix = _ETRYND_PREFIX.get(etryndnm_el.text if etryndnm_el is not None else None)
+        if prefix is None:
+            continue  # "입항"/"출항" 외 값(모르는 이벤트 종류)은 안전하게 건너뛴다
+        for field in detail_el:
+            if field.tag == "etryndNm":
+                continue
+            out[f"{prefix}{field.tag}"] = field.text
+    return out
+
+
+def find_last_collected_end_date() -> str | None:
+    """data/raw/portmis/ 에 이미 있는 raw 파일들 중 가장 늦은 end_date를 찾는다.
+
+    별도 체크포인트 파일을 두지 않는다 — 파일명(portmis_vessel_<start>_<end>.json)
+    자체가 "언제까지 수집했는지"를 이미 담고 있으므로, 그 디렉터리를 그대로 상태로
+    쓴다(tide_collector.py가 날짜별 파일명으로 멱등성을 표현하는 것과 같은 원칙).
+    """
+    if not os.path.isdir(RAW_PORTMIS_DIR):
+        return None
+    end_dates = [
+        m.group(2)
+        for name in os.listdir(RAW_PORTMIS_DIR)
+        if (m := _RAW_FILENAME_RE.match(name))
+    ]
+    return max(end_dates) if end_dates else None
+
+
+def resolve_incremental_start_date() -> str:
+    """--start 생략 시 쓸 시작일 — "자동 이어붙이기".
+
+    마지막 수집 종료일을 하루 겹쳐서(포함) 다시 시작한다 — 그날 수집 이후에 추가로
+    들어온 입항 신고를 놓치지 않기 위한 보수적 겹침이며, upsert라 중복 걱정이 없다
+    (모듈 docstring 참고). 수집 이력이 전혀 없으면(최초 실행) 오늘부터 시작한다.
+    """
+    last_end = find_last_collected_end_date()
+    if last_end is None:
+        return datetime.datetime.now().strftime("%Y%m%d")
+    return last_end
 
 
 def fetch_vessel_entries(port_code: str, start_date: str, end_date: str) -> list:
@@ -129,7 +211,8 @@ def fetch_vessel_entries(port_code: str, start_date: str, end_date: str) -> list
             # item 파싱
             items = root.findall(".//item")
             for item in items:
-                record = {child.tag: child.text for child in item}
+                record = {child.tag: child.text for child in item if child.tag != "details"}
+                record.update(_parse_details(item.find("details")))
                 all_records.append(record)
 
             print(f"  [페이지 {page}] {len(items)}건 수집 (누계 {len(all_records)}/{total_count}건)")
@@ -178,8 +261,18 @@ def collect_portmis(start_date: str, end_date: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PORT-MIS 울산항 선박 입출항 수집기")
     today_str = datetime.datetime.now().strftime("%Y%m%d")
-    parser.add_argument("--start", type=str, default=today_str, help="조회 시작일 (YYYYMMDD). 기본: 오늘")
+    parser.add_argument(
+        "--start", type=str, default=None,
+        help="조회 시작일 (YYYYMMDD). 생략하면 마지막 수집 종료일부터 자동 이어붙이기(최초 실행이면 오늘)",
+    )
     parser.add_argument("--end", type=str, default=today_str, help="조회 종료일 (YYYYMMDD). 기본: 오늘")
     args = parser.parse_args()
 
-    collect_portmis(start_date=args.start, end_date=args.end)
+    start_date = args.start
+    if start_date is None:
+        start_date = resolve_incremental_start_date()
+        reason = "이전 수집 이력 없음 → 오늘부터" if find_last_collected_end_date() is None \
+            else f"마지막 수집 종료일({start_date})부터 겹쳐서 이어붙임"
+        print(f"[자동 이어붙이기] --start 생략됨 — {reason}")
+
+    collect_portmis(start_date=start_date, end_date=args.end)

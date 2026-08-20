@@ -187,6 +187,56 @@ def _pick_facility(candidates: list, usage: dict) -> str:
     usage[best] = usage.get(best, 0) + 1
     return best
 
+
+# ---------------------------------------------------------------------------
+# 화물-선석 적합성 정합 (2026-08-19,
+# 08_스케줄링_전면재설계_자동배정_설계문서.md §4.1.5)
+#
+# 기존 _pick_facility는 화물 종류와 무관하게 LIQUID_FACILITIES 24곳을 한
+# 목록으로 놓고 용량 대비 사용률만 봤다 — 즉 "가솔린이 액체화학 전용 부두에"
+# 같은 조합도 통계적으로 발생했다. 실제 스케줄링 로직(cargo_category_loader.py)이
+# 화물을 원유/유류/액체화학 3개로 가르고 선석의 handling_cargo_name과 대조하므로,
+# 합성 데이터도 같은 기준으로 걸러야 새 알고리즘 검증이 의미 있다.
+#
+# FACILITY_CATEGORY: LIQUID_FACILITIES 각 선석의 실제 handling_cargo_name
+# (2026-08-19 라이브 DB 직접 조회, upa_berth_facility).
+FACILITY_CATEGORY: dict[str, str] = {
+    "정일1부두": "액체화학", "정일2부두": "액체화학", "OTK1부두": "액체화학",
+    "OTK2부두": "액체화학", "UTK부두": "액체화학", "UTT부두": "액체화학",
+    "S-Oil 1부두": "유류", "S-Oil 2부두": "유류", "S-Oil 3부두": "유류", "S-Oil 4부두": "액체화학",
+    "SK1부두": "유류", "SK2부두": "유류", "SK3부두": "유류", "SK4부두": "유류",
+    "SK5부두": "유류", "SK6부두": "유류", "SK7부두": "유류", "SK8부두": "유류",
+    "가스부두": "유류", "효성부두": "액체화학", "대한유화부두": "액체화학",
+    "용잠1부두": "액체화학", "용잠2부두": "액체화학",
+    "현대오일터미널 신항1부두": "유류", "현대오일터미널 신항2부두": "액체화학",
+}
+
+# UN번호 -> 카테고리. imdg_dgl.SHIP_KIND_ALLOWED_UN/VIOLATION_ONLY_UN에 실제
+# 등장하는 UN 전체를 cargo_category_loader.py의 CARGO_CATEGORIES(chem_id 기준)와
+# 같은 물질명 기준으로 대응시켰다 — 손으로 새로 분류하지 않고 이미 있는 정본을
+# 따른 것뿐이다. 1993(총칭 인화성액체, 미상 폴백)은 특정 물질이 아니라서
+# 안전측으로 "유류"에 근사한다(원유는 아니고, 특정 액체화학 물질도 아님).
+UN_TO_CATEGORY: dict[str, str] = {
+    "1267": "원유",                                       # 석유(원유)
+    "1202": "유류", "1203": "유류", "1223": "유류", "1268": "유류", "1993": "유류",
+    "1011": "유류", "1978": "유류", "1972": "유류", "1077": "유류", "1005": "유류",
+    "1114": "액체화학", "1294": "액체화학", "1093": "액체화학", "1230": "액체화학",
+    "1280": "액체화학", "1307": "액체화학", "2055": "액체화학", "2056": "액체화학",
+    "1010": "액체화학", "1830": "액체화학",
+}
+
+
+def _eligible_facilities(candidates: list, un_no: str | None) -> list:
+    """카테고리 적합성으로 후보를 좁힌다. 매칭 정보가 없으면(건화물, 미분류 UN)
+    원래 후보 전체로 폴백한다 — 합성 데이터가 아예 안 나오는 것보다는 낫다."""
+    if not un_no:
+        return candidates
+    category = UN_TO_CATEGORY.get(str(un_no))
+    if not category:
+        return candidates
+    narrowed = [f for f in candidates if FACILITY_CATEGORY.get(f) == category]
+    return narrowed or candidates
+
 # ---------------------------------------------------------------------------
 # 인접 선석쌍 — berth_neo4j_loader.PILOT_ADJACENT_PAIRS 와 동일(ADJACENT_TO).
 # 혼재금지는 "인접 선석에서 비혼재 등급을 동시 취급"할 때 걸린다.
@@ -546,7 +596,8 @@ def build_v2(pool):
         i += 1
         for _ in range(random.randint(1, 3)):
             cargo, un, _imdg, _pg, basis = pick_cargo(cat, liq, est)
-            facility = _pick_facility(LIQUID_FACILITIES if un else DRY_FACILITIES, facility_usage)
+            base_candidates = LIQUID_FACILITIES if un else DRY_FACILITIES
+            facility = _pick_facility(_eligible_facilities(base_candidates, un), facility_usage)
             rows.append(make_row(cs, vname, cat, cargo, un, basis, facility, seq))
             seq += 1
 

@@ -50,11 +50,13 @@ CargoCategory 노드 이름은 cargo_category_loader.py가 Chemical.cargo_catego
     NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, NEO4J_DATABASE
 """
 
+import csv
 import logging
 import math
 import os
 import re
 from collections import defaultdict
+from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
@@ -225,8 +227,8 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
     with pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
             SELECT wharf_name, port_name, length_m, depth_m, berth_capacity,
-                   handling_cargo_name, wharf_se_name, port_operator_name,
-                   latitude, longitude
+                   unload_capacity, berth_vessel_count, handling_cargo_name,
+                   wharf_se_name, port_operator_name, latitude, longitude
             FROM upa_berth_facility
             WHERE wharf_name IS NOT NULL AND wharf_name <> ''
         """)
@@ -246,7 +248,29 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
             "port_name": row["port_name"],
             "length_m": row["length_m"],
             "depth_m": row["depth_m"],
-            "berth_capacity": row["berth_capacity"],
+            # ONSAN_BERTH_CAPACITY_DWT 보정을 노드 속성 자체에 baked-in 한다
+            # (2026-08-19) — 예전엔 compute_substitutability_pairs/
+            # assign_fallback_anchorage 두 함수가 호출 시점마다 각자
+            # `berth_capacity or ONSAN_BERTH_CAPACITY_DWT.get(...)`를 따로
+            # 적용했는데, Berth.berth_capacity 속성 자체는 raw 값(69개 중
+            # 대부분 NULL, 07 문서 §4.1.1)이라 08 설계문서의 부이 게이트
+            # (§4.1.3-A, VLCC_BUOY_DWT_THRESHOLD 비교)처럼 새로 이 속성을
+            # 직접 읽는 소비자는 보정을 못 받는 문제가 있었다. 로더 단계에서
+            # 한 번만 보정해 두면 이후 모든 소비자(기존 두 함수 포함, 그쪽의
+            # `or` 폴백은 이미 보정된 값에 적용돼도 무해함)가 같은 값을 본다.
+            "berth_capacity": row["berth_capacity"] or ONSAN_BERTH_CAPACITY_DWT.get(name),
+            # 08_스케줄링_전면재설계_자동배정_설계문서.md §5.2.1-B — 소프트 가중치
+            # (타이브레이커)로만 쓴다. 결측이 많아(온산 액체화학 선석 다수는 있지만
+            # SK1~8·S-Oil 1~3 등은 NULL) 하드 게이트로 쓰지 않는다.
+            "unload_capacity": row["unload_capacity"],
+            # 2026-08-19 — Neo4j Berth 노드의 동시접안 슬롯 수. brthdVslCntVl(동시접안
+            # 가능 척수)이 이미 UPA 원본에 있었다. backend의 berth_assignment는 이제
+            # (berth 테이블 없이) upa_berth_facility.berth_vessel_count를 직접 읽는다.
+            "berth_vessel_count": row["berth_vessel_count"],
+            # 큐레이션 오버라이드 적용값 — HANDLES 관계(아래 categories)와 같은
+            # 값을 쓴다. raw 값을 그대로 두면 가스부두 등에서 "취급화물: 유류"로
+            # 표시돼(대시보드 BerthInfo) 실제 HANDLES("가스")와 화면 표시가
+            # 어긋난다.
             "handling_cargo_name": _handling_cargo(row),
             "wharf_se_name": row["wharf_se_name"],
             "port_operator_name": row["port_operator_name"],
@@ -278,6 +302,7 @@ ON CREATE SET
     b.length_m            = row.length_m,
     b.depth_m             = row.depth_m,
     b.berth_capacity      = row.berth_capacity,
+    b.unload_capacity     = row.unload_capacity,
     b.handling_cargo_name = row.handling_cargo_name,
     b.wharf_se_name       = row.wharf_se_name,
     b.port_operator_name  = row.port_operator_name,
@@ -292,6 +317,7 @@ ON MATCH SET
     b.length_m            = row.length_m,
     b.depth_m             = row.depth_m,
     b.berth_capacity      = row.berth_capacity,
+    b.unload_capacity     = row.unload_capacity,
     b.handling_cargo_name = row.handling_cargo_name,
     b.wharf_se_name       = row.wharf_se_name,
     b.port_operator_name  = row.port_operator_name,
@@ -460,6 +486,135 @@ def transfer_berths_to_neo4j(pg_conn, neo4j_driver) -> None:
         "Berth 이관 완료: Berth %d개, HANDLES 대상 %d개, "
         "ADJACENT_TO 쌍 %d개(파일럿 %d + 좌표계산 %d, 중복 제거 후)",
         len(batch), len(handles_batch), len(adjacent_batch), len(pilot_pairs), len(distance_pairs),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# cargo_kind 세분화 적재 (2026-08-19 신설)
+#
+# 07_입항승인_선석확정_설계문서.md §4.1.1이 지적한 공백: handling_cargo_name
+# (upa_berth_facility, 이 파일이 이미 읽는 실시간 소스)에는 원유/유류/액체화학
+# 3개 토큰만 있고(cargo_category_loader.py 주석에서 라이브 조회로 재확인),
+# 더 세밀한 값(케미칼류/LPG/비료원료 등)은 data/seed/ulsan_berth_spec_seed.csv의
+# cargo_kind 컬럼에만 있는데 이걸 Neo4j에 적재하는 로더가 없었다. 이 절이
+# 그 로더다.
+#
+# [범위를 일부러 좁혔다 — 반드시 읽을 것]
+# 이 로더는 Berth 노드에 cargo_kind_detail 속성(문자열 배열)만 추가한다.
+# 기존 HANDLES/CargoCategory 관계나 find_eligible_berths()의 매칭 로직은
+# 건드리지 않는다. 이유: HANDLES의 카테고리 이름은 cargo_category_loader.py가
+# "화물(=화학물질) 쪽"에서 원유/유류/액체화학 3개로만 분류한 값과 반드시
+# 일치해야 매칭이 성립하는데(같은 문자열 상수를 공유하는 게 이 그래프 모델의
+# 전제, 이 파일 상단 docstring 참고), 화물 쪽에 케미칼류/LPG/비료원료로
+# 분류하는 로직 자체가 없다. 여기서 HANDLES에 세분화 카테고리를 추가해도
+# 그 카테고리로 분류되는 화물이 하나도 없어 죽은 엣지가 될 뿐이다(실제로
+# 매칭에 쓰이지 않음). 그래서 "조회 가능하게 적재"까지만 하고, 실제 배정
+# 게이트로 쓰는 건 화물 쪽 5-tier 분류기가 생긴 뒤의 별도 작업으로 남긴다.
+#
+# 매칭: CSV facility_name -> Neo4j Berth.wharf_name. 두 표기 체계가 정확히
+# 같지 않을 수 있어(mart.facility_alias가 이미 겪은 문제와 동일 종류) 정규화
+# 후 비교한다 — mart.norm_berth()(mart_views.sql)와 같은 규칙(괄호 제거,
+# 공백 제거, 소문자화, 끝자리 숫자 제거)을 Python으로 재현했다. SK2부두처럼
+# 한 wharf_name이 berth_id 여러 개로 갈라진 경우(운영주체 구분) 전부에 같은
+# cargo_kind_detail을 적용한다 — CSV 자체가 그 이상 세밀하게 구분하지 않는다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+CARGO_KIND_SEED_CSV = Path(__file__).resolve().parents[2] / "data" / "seed" / "ulsan_berth_spec_seed.csv"
+
+
+def _normalize_wharf_name(name: str) -> str:
+    """mart.norm_berth()(mart_views.sql)와 동일 규칙의 Python 재현.
+
+    SQL 함수를 Python에서 그대로 호출할 수 없어(다른 프로세스) 규칙만 복제한다
+    — 규칙이 바뀌면 두 곳 다 고쳐야 한다는 뜻이지만, 이 정도로 안정된(2026-08-11
+    확정) 정규화 규칙을 매번 DB 왕복으로 확인할 정도는 아니라고 판단했다.
+    """
+    s = re.sub(r"\(.*\)", "", name)
+    s = re.sub(r"\s+", "", s)
+    s = s.lower()
+    return re.sub(r"[0-9]+$", "", s)
+
+
+def fetch_cargo_kind_rows(csv_path: Path = CARGO_KIND_SEED_CSV) -> list[dict]:
+    """ulsan_berth_spec_seed.csv를 읽어 (정규화 부두명, cargo_kind 목록) 행으로 변환.
+
+    cargo_kind 셀은 '·'로 여러 값을 함께 적어 둔 경우가 있다(예: '유류·케미칼류',
+    복합 취급 부두) — 그대로 배열로 쪼갠다.
+    """
+    if not csv_path.exists():
+        logger.warning("cargo_kind 시드 CSV 없음: %s — 이 단계 스킵", csv_path)
+        return []
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = []
+        for r in reader:
+            name = (r.get("facility_name") or "").strip()
+            kind = (r.get("cargo_kind") or "").strip()
+            if not name or not kind:
+                continue
+            rows.append({
+                "facility_name": name,
+                "norm_name": _normalize_wharf_name(name),
+                "cargo_kinds": [k.strip() for k in kind.split("·") if k.strip()],
+            })
+        return rows
+
+
+_CYPHER_SET_CARGO_KIND_DETAIL = """
+UNWIND $batch AS row
+MATCH (b:Berth {id: row.berth_id})
+SET b.cargo_kind_detail    = row.cargo_kinds,
+    b.cargo_kind_source    = 'ulsan_berth_spec_seed.csv',
+    b.cargo_kind_updated_at = datetime()
+"""
+
+
+def _tx_set_cargo_kind_detail(tx, batch: list[dict]) -> None:
+    tx.run(_CYPHER_SET_CARGO_KIND_DETAIL, batch=batch)
+
+
+def transfer_cargo_kind_to_neo4j(pg_conn, neo4j_driver, *, csv_path: Path = CARGO_KIND_SEED_CSV) -> None:
+    """cargo_kind 세분화 값을 이미 적재된 Berth 노드에 속성으로 추가한다.
+
+    Berth 노드 자체는 만들지 않는다(transfer_berths_to_neo4j가 이미 했어야
+    함) — CSV에만 있고 upa_berth_facility에는 없는 부두명이 매칭 실패로
+    빠지는 것과, 애초에 Berth 노드가 없어 MATCH가 실패하는 것을 같은 로그로
+    구분할 수 있게 하기 위해 별도 단계로 둔다.
+    """
+    csv_rows = fetch_cargo_kind_rows(csv_path)
+    if not csv_rows:
+        return
+
+    berths = fetch_berth_rows(pg_conn)
+    by_norm_name: dict[str, list[str]] = defaultdict(list)
+    for berth in berths:
+        by_norm_name[_normalize_wharf_name(berth["wharf_name"])].append(berth["berth_id"])
+
+    batch: list[dict] = []
+    unmatched: list[str] = []
+    for row in csv_rows:
+        berth_ids = by_norm_name.get(row["norm_name"])
+        if not berth_ids:
+            unmatched.append(row["facility_name"])
+            continue
+        for berth_id in berth_ids:
+            batch.append({"berth_id": berth_id, "cargo_kinds": row["cargo_kinds"]})
+
+    if unmatched:
+        logger.warning(
+            "cargo_kind 매칭 실패(Neo4j Berth에 없음, %d/%d건): %s",
+            len(unmatched), len(csv_rows), unmatched,
+        )
+    if not batch:
+        logger.warning("cargo_kind 적용 대상 Berth 없음 — 적재 스킵")
+        return
+
+    with neo4j_driver.session(database=NEO4J_DATABASE) as session:
+        session.execute_write(_tx_set_cargo_kind_detail, batch)
+
+    logger.info(
+        "cargo_kind 세분화 적재 완료: %d개 Berth 노드(CSV %d행 중 매칭 %d행)",
+        len(batch), len(csv_rows), len(csv_rows) - len(unmatched),
     )
 
 
@@ -763,6 +918,10 @@ def run_berth_transfer(*, include_onsan_extensions: bool = True) -> None:
 
         ensure_neo4j_schema(neo4j_driver)
         transfer_berths_to_neo4j(pg_conn, neo4j_driver)
+        # 정적 CSV 보강이라 include_onsan_extensions 스코프와 무관하게 항상 실행.
+        # CSV가 없거나 매칭 실패해도 경고만 남기고 계속 진행한다(fetch_cargo_kind_rows/
+        # transfer_cargo_kind_to_neo4j 둘 다 fail-soft).
+        transfer_cargo_kind_to_neo4j(pg_conn, neo4j_driver)
 
         if include_onsan_extensions:
             transfer_substitutability_to_neo4j(pg_conn, neo4j_driver)

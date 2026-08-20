@@ -25,8 +25,20 @@ PORT-MIS 응답 컬럼 → 표준 컬럼 매핑:
     nxlnptPrtNm      → next_port_nm         (다음 입항 예정 명)
     dstnNatPrtCd     → dest_port_cd         (최종 목적지 코드)
     dstnPrtNm        → dest_port_nm         (최종 목적지 명)
-    tkoffPrrrnDt     → departure_sched_utc  (출항 예정 일시, 입항 선박용)
-    dstnEtryptDt     → dest_arrival_utc     (목적지 입항 예정 일시, 출항 선박용)
+
+    (2026-08-20) collect_portmis.py가 <details><detail>(입항/출항 이벤트별)를
+    arrival_/departure_ 접두로 이미 평탄화해서 넘긴다 — 예전엔 이 블록 전체가
+    파싱 없이 버려졌다(raw XML 직접 확인으로 재현·수정, 07 문서 §4.4.1 참고):
+    arrival_etryptDt      → arrival_at_utc       (실제 입항 일시)
+    arrival_laidupFcltyCd → arrival_facility_cd  (공식 배정 계선시설 코드)
+    arrival_laidupFcltyNm → arrival_facility_nm  (공식 배정 계선시설 명)
+    arrival_tkoffPrrrnDt  → departure_sched_utc  (입항 시점에 신고한 출항 "예정" 일시)
+    arrival_grtg          → gross_tonnage        (총톤수)
+    arrival_satmntEntrpsNm→ agency_name          (선박대리점)
+    departure_tkoffDt        → departure_at_utc      (실제 출항 일시)
+    departure_laidupFcltyCd  → departure_facility_cd (출항 시점 계선시설 코드)
+    departure_laidupFcltyNm  → departure_facility_nm (출항 시점 계선시설 명)
+    departure_dstnEtryptDt   → dest_arrival_utc      (목적지 입항 예정 일시)
 """
 
 import os
@@ -65,10 +77,44 @@ COLUMN_MAP = {
     "nxlnptPrtNm":       "next_port_nm",
     "dstnNatPrtCd":      "dest_port_cd",
     "dstnPrtNm":         "dest_port_nm",
-    "tkoffPrrrnDt":      "departure_sched_utc",
-    "dstnEtryptDt":      "dest_arrival_utc",
-    "details":           "_details_raw",         # 파싱 후 제거
+    # 입항 이벤트(collect_portmis.py의 arrival_ 접두) — details 파싱 복원(2026-08-20)
+    "arrival_etryptDt":        "arrival_at_utc",
+    "arrival_laidupFcltyCd":   "arrival_facility_cd",
+    "arrival_laidupFcltyNm":   "arrival_facility_nm",
+    "arrival_tkoffPrrrnDt":    "departure_sched_utc",
+    "arrival_grtg":            "gross_tonnage",
+    "arrival_satmntEntrpsNm":  "agency_name",
+    # 출항 이벤트(departure_ 접두) — 아직 출항 전이면 전부 결측으로 남는다(정상)
+    "departure_tkoffDt":       "departure_at_utc",
+    "departure_laidupFcltyCd": "departure_facility_cd",
+    "departure_laidupFcltyNm": "departure_facility_nm",
+    "departure_dstnEtryptDt":  "dest_arrival_utc",
 }
+
+# tz 오프셋이 붙어 오는 필드(예: "2026-06-01T00:10:00+09:00") — parse_datetime_utc가
+# 그대로 처리 가능.
+_OFFSET_AWARE_DATETIME_COLS = ["arrival_at_utc", "departure_at_utc"]
+
+# tz 오프셋 없이 오는 필드(예: "2026-06-01 04:30:00") — PORT-MIS는 한국 기관이라
+# 이 값들은 KST 기준이다. 그대로 UTC로 해석하면 9시간이 밀린다(2026-08-20 확인 —
+# arrival_at_utc/departure_at_utc와 달리 이 두 필드만 원본에 오프셋이 없다).
+_NAIVE_KST_DATETIME_COLS = ["departure_sched_utc", "dest_arrival_utc"]
+
+
+def _parse_naive_kst_to_utc(df: pd.DataFrame, columns: list) -> pd.DataFrame:
+    df = df.copy()
+    for col in columns:
+        if col not in df.columns:
+            continue
+        parsed = pd.to_datetime(df[col], errors="coerce")
+        if hasattr(parsed.dt, "tz") and parsed.dt.tz is not None:
+            # 이미 tz-aware로 파싱됐으면(예상 밖 포맷) 그대로 UTC 변환만 한다.
+            df[col] = parsed.dt.tz_convert("UTC")
+        else:
+            df[col] = parsed.dt.tz_localize(
+                "Asia/Seoul", ambiguous="NaT", nonexistent="NaT"
+            ).dt.tz_convert("UTC")
+    return df
 
 # 선종 코드 → 대분류 라벨
 # 출처: 해양수산부 PORT-MIS CODE BOOK "03.해사안전(19종) > 가.선박 > 1.선박용도코드"
@@ -159,14 +205,20 @@ def preprocess_portmis():
     # 2. 컬럼명 표준화
     df = cu.standardize_column_names(df, COLUMN_MAP)
 
-    # 3. 불필요 컬럼 제거
-    if "_details_raw" in df.columns:
-        df = df.drop(columns=["_details_raw"])
+    # 2-1. COLUMN_MAP에 없는 원본 필드 제거 — details 파싱 복원(2026-08-20)으로
+    # arrival_/departure_ 접두 원본 필드가 20여 개 추가로 들어오는데, 그중 승무원
+    # 수·예선/도선 여부·화물톤수 세부내역·선박신고번호(mrNum) 등은 지금 이 표(DB)
+    # 스키마에 없다. 이 표는 backend(Alembic) 소유라(auto_create=False) 여기서
+    # 컬럼을 새로 만들 수 없으므로, COLUMN_MAP에서 의도적으로 고른 필드만 남기고
+    # 나머지는 버린다(필요해지면 백엔드 마이그레이션과 함께 다시 추가할 것).
+    # 예전 raw 파일에 남아있던 미파싱 "details" 원문 컬럼도 이 필터로 같이 걸러진다.
+    _known_cols = set(COLUMN_MAP.values())
+    df = df[[c for c in df.columns if c in _known_cols]]
 
-    # 4. 결측값 표준화
+    # 3. 결측값 표준화
     df = cu.normalize_nulls(df)
 
-    # 5. 공통 메타데이터 추가
+    # 4. 공통 메타데이터 추가
     df = cu.add_common_metadata(
         df,
         source_system="PORTMIS",
@@ -174,10 +226,17 @@ def preprocess_portmis():
         is_synthetic=False
     )
 
-    # 6. 숫자형 변환
-    df = cu.to_numeric_safe(df, ["entry_year", "entry_count", "ship_kind_cd"])
+    # 5. 숫자형 변환
+    df = cu.to_numeric_safe(df, ["entry_year", "entry_count", "ship_kind_cd", "gross_tonnage"])
 
-    # 7. 기본키 결측 검증 (호출부호 필수)
+    # 5-1. 시각 파싱 — arrival_at_utc/departure_at_utc는 원본에 +09:00 오프셋이
+    # 붙어 오고(parse_datetime_utc가 그대로 처리), departure_sched_utc/
+    # dest_arrival_utc는 오프셋 없이 KST naive로 오므로 별도 변환이 필요하다
+    # (모듈 docstring, 2026-08-20 details 파싱 복원 참고).
+    df = cu.parse_datetime_utc(df, _OFFSET_AWARE_DATETIME_COLS)
+    df = _parse_naive_kst_to_utc(df, _NAIVE_KST_DATETIME_COLS)
+
+    # 6. 기본키 결측 검증 (호출부호 필수)
     df = cu.flag_missing_key(df, ["callsgn"])
 
     # 8. 선종 대분류 라벨 추가
