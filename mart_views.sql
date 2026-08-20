@@ -1475,3 +1475,51 @@ WHERE pc.arrival_at_utc IS NOT NULL
   AND pc.departure_at_utc - pc.arrival_at_utc < INTERVAL '30 days'
 GROUP BY fa.wharf_name
 HAVING count(*) >= 5;
+
+
+-- ---------------------------------------------------------------------------
+-- 12. mart.berth_handling_cargo   선석 취급화물 (큐레이션 보정 반영, 단일 정본)
+--
+-- 원천 upa_berth_facility.handling_cargo_name 은 대분류라, 물리적으로 전혀 다른
+-- 설비를 같은 '유류'로 묶어 놓은 곳이 있다. 그 보정을 지금까지 파이썬 쪽
+-- (berth_neo4j_loader.HANDLING_CARGO_OVERRIDES)에만 두었더니, Neo4j 를 읽는
+-- 스케줄링 에이전트는 '가스'로 판정하는데 SQL 을 읽는 화면(선석 배정현황)은
+-- '유류'로 표시하는 어긋남이 생겼다(2026-08-20 실측).
+--
+-- 같은 판정 기준이 두 군데 살아 있으면 반드시 갈라진다. 그래서 보정을 이 뷰
+-- 하나에만 두고, Neo4j 로더와 백엔드 API 가 똑같이 여기서 읽는다.
+--
+-- 보정 근거:
+--  · 석유공사부이 — 수심 27 m 해상 계류점(SPM), 운영사 한국석유공사(원유비축기지).
+--    같은 데이터의 다른 부이 4기는 전부 '원유'다. '유류'로 두면 흘수 6 m 제품유
+--    운반선에게 VLCC 용 부이가 후보로 올라온다.
+--  · 가스부두 / SK1부두 / SK2부두(SK가스㈜ 운영분) — LPG 전용 터미널이다. 가압·
+--    냉동 탱크와 증기환수 배관이 필요해 일반 석유제품 부두와 같이 묶을 수 없다.
+--    ※ 'SK2부두' 는 SK가스㈜(수심 7.5)와 SK에너지㈜(수심 8.0) 두 곳이 이름을
+--      공유한다 — 그래서 보정 키가 (선석명, 운영사) 다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.berth_handling_cargo AS
+SELECT bf.record_uid,
+       bf.wharf_name,
+       bf.port_name,
+       bf.port_operator_name,
+       bf.handling_cargo_name                       AS source_handling_cargo_name,
+       CASE
+           WHEN bf.wharf_name = '석유공사부이' AND bf.port_operator_name = '한국석유공사'
+               THEN '원유'
+           WHEN bf.wharf_name IN ('가스부두', 'SK1부두', 'SK2부두')
+                AND bf.port_operator_name = 'SK가스㈜'
+               THEN '가스'
+           ELSE bf.handling_cargo_name
+       END                                          AS handling_cargo_name,
+       (
+           CASE
+               WHEN bf.wharf_name = '석유공사부이' AND bf.port_operator_name = '한국석유공사'
+                   THEN '원유'
+               WHEN bf.wharf_name IN ('가스부두', 'SK1부두', 'SK2부두')
+                    AND bf.port_operator_name = 'SK가스㈜'
+                   THEN '가스'
+               ELSE bf.handling_cargo_name
+           END
+       ) IS DISTINCT FROM bf.handling_cargo_name    AS is_corrected
+FROM upa_berth_facility bf;

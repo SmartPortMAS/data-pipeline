@@ -173,42 +173,13 @@ def ensure_neo4j_schema(driver) -> None:
 # PostgreSQL -> 배치 행 변환
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 취급화물 큐레이션 보정 (원천 시설데이터의 라벨이 실제 운영과 어긋나는 선석)
+# 취급화물 큐레이션 보정은 mart.berth_handling_cargo 뷰가 정본이다.
 #
-# 원천의 handling_cargo_name 은 대분류라, 물리적으로 전혀 다른 설비를 같은
-# '유류'로 묶어 놓은 곳이 있다. 그대로 두면 스케줄링 에이전트가 실제로는
-# 댈 수 없는 선석을 후보로 올린다(2026-08-18 실측 확인).
-#
-#  · 석유공사부이 — 원천 '유류'. 그러나 수심 27 m 해상 계류점(SPM)이고 운영사가
-#    한국석유공사(원유비축기지)다. 같은 데이터의 다른 부이 4기(SK2·SK3·S-Oil·
-#    S-Oil&오일허브)는 전부 '원유'로 라벨돼 있고, 우리 선석 큐레이션
-#    (frontend geoUtils.ONSAN_BERTHS)도 이 부이를 '원유'로 적고 있다.
-#    '유류'로 두면 흘수 6 m 짜리 제품유 운반선이 VLCC용 부이에 배정된다.
-#
-#  · 가스부두 / SK1부두 / SK2부두(SK가스㈜ 운영분) — 원천 '유류'. 운영사가
-#    SK가스㈜인 LPG 터미널이다. LPG 운반선은 가압·냉동 탱크와 증기환수 배관이
-#    있는 전용 터미널에만 댈 수 있어, 일반 석유제품 부두와 같은 카테고리로
-#    묶으면 안 된다. 실제로 지금 재항 중인 가스선(가스 프리웨이·에코 가스·
-#    HENRIETTA KOSAN 등)이 전부 이 경로로 잘못 매칭됐다.
-#    ※ 'SK2부두'는 SK가스㈜(수심 7.5)와 SK에너지㈜(수심 8.0) 두 곳이 같은
-#      이름을 쓴다 — 그래서 키를 (선석명, 운영사)로 잡는다.
-#
-# 원천 테이블을 직접 고치지 않는 이유: 수집기가 다시 돌면 되돌아간다.
-# 보정은 여기 한 곳에만 두고, 근거를 남겨 팀이 검토할 수 있게 한다.
-# ─────────────────────────────────────────────────────────────────────────────
-HANDLING_CARGO_OVERRIDES: dict[tuple[str, str], str] = {
-    ("석유공사부이", "한국석유공사"): "원유",
-    ("가스부두", "SK가스㈜"): "가스",
-    ("SK1부두", "SK가스㈜"): "가스",
-    ("SK2부두", "SK가스㈜"): "가스",
-}
-
-
-def _handling_cargo(row: dict) -> str | None:
-    """원천 취급화물명에 큐레이션 보정을 적용한다."""
-    key = (row.get("wharf_name"), row.get("port_operator_name"))
-    return HANDLING_CARGO_OVERRIDES.get(key, row.get("handling_cargo_name"))
+# 예전에는 이 파일에 파이썬 dict(HANDLING_CARGO_OVERRIDES)로 들고 있었는데,
+# 그러면 Neo4j 를 읽는 스케줄링 에이전트와 SQL 을 읽는 화면이 서로 다른 값을
+# 보게 된다 — 실제로 가스부두가 그래프에서는 '가스', 선석 배정현황 화면에서는
+# '유류' 로 나왔다(2026-08-20 실측). 같은 기준이 두 군데 살아 있으면 갈라진다.
+# 보정 근거와 목록은 data-pipeline/mart_views.sql 12절 참고.
 
 
 def _split_cargo_categories(handling_cargo_name: str | None) -> list[str]:
@@ -226,11 +197,15 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
     """
     with pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
-            SELECT wharf_name, port_name, length_m, depth_m, berth_capacity,
-                   unload_capacity, berth_vessel_count, handling_cargo_name,
-                   wharf_se_name, port_operator_name, latitude, longitude
-            FROM upa_berth_facility
-            WHERE wharf_name IS NOT NULL AND wharf_name <> ''
+            SELECT bf.wharf_name, bf.port_name, bf.length_m, bf.depth_m,
+                   bf.berth_capacity, bf.unload_capacity, bf.berth_vessel_count,
+                   -- 원천 컬럼이 아니라 보정된 값을 쓴다(mart_views.sql 12절)
+                   bhc.handling_cargo_name,
+                   bf.wharf_se_name, bf.port_operator_name,
+                   bf.latitude, bf.longitude
+            FROM upa_berth_facility bf
+            JOIN mart.berth_handling_cargo bhc ON bhc.record_uid = bf.record_uid
+            WHERE bf.wharf_name IS NOT NULL AND bf.wharf_name <> ''
         """)
         raw_rows = cur.fetchall()
 
@@ -271,12 +246,12 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
             # 값을 쓴다. raw 값을 그대로 두면 가스부두 등에서 "취급화물: 유류"로
             # 표시돼(대시보드 BerthInfo) 실제 HANDLES("가스")와 화면 표시가
             # 어긋난다.
-            "handling_cargo_name": _handling_cargo(row),
+            "handling_cargo_name": row["handling_cargo_name"],
             "wharf_se_name": row["wharf_se_name"],
             "port_operator_name": row["port_operator_name"],
             "latitude": row["latitude"],
             "longitude": row["longitude"],
-            "categories": _split_cargo_categories(_handling_cargo(row)),
+            "categories": _split_cargo_categories(row["handling_cargo_name"]),
             "berth_group": ONSAN_BERTH_GROUP_MAP.get(name),
             # 스케줄링 에이전트가 온산 선석을 우선 배정하는 근거가 되는 값.
             # 백엔드는 coalesce(b.onsan_scope, false)로 읽는데(scheduling/
