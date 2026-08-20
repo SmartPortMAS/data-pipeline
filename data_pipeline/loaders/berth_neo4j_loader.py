@@ -130,12 +130,16 @@ ONSAN_BERTH_GROUP_MAP: dict[str, str] = {
 }
 
 # 온산 MVP가 정의한 온산 스코프(액체화물 12부두 + 부이 3기). 좌표 거리 기반
-# ADJACENT_TO/SUBSTITUTABLE_WITH 자동 계산을 이 범위로 한정할 때 쓴다 — 울산항
-# 전체 69개 선석 중 무관한 조합(예: 컨테이너부두 vs 벌크부두)까지 계산하지
-# 않기 위함. 이 스코프 밖 선석은 그래프 적재 자체에는 영향 없다.
+# ADJACENT_TO/SUBSTITUTABLE_WITH 자동 계산과 스케줄링 에이전트의 배정 대상
+# 범위(graph_queries._CYPHER_FIND_ELIGIBLE_BERTHS)를 이 범위로 한정할 때 쓴다
+# — 울산항 전체 69개 선석 중 무관한 조합(예: 컨테이너부두 vs 벌크부두)까지
+# 계산하지 않기 위함. 이 스코프 밖 선석은 그래프 적재 자체에는 영향 없다.
+#
+# 달포부두(유류, 울산항만공사)는 원천 시설데이터(ulsan_berth_spec_seed.csv)
+# 기준으로도 온산항 소속인데 최초 큐레이션에서 누락돼 있었다
 ONSAN_SCOPE_WHARF_NAMES: set[str] = {
     "OTK1부두", "OTK2부두", "정일1부두", "정일2부두", "UTK부두", "대한유화부두",
-    "효성부두", "S-Oil 1부두", "S-Oil 2부두", "S-Oil 3부두", "S-Oil 4부두",
+    "효성부두", "달포부두", "S-Oil 1부두", "S-Oil 2부두", "S-Oil 3부두", "S-Oil 4부두",
     "S-Oil부이", "S-Oil&오일허브 부이", "석유공사부이",
 }
 
@@ -378,8 +382,8 @@ def compute_adjacent_pairs_by_distance(
 
     PILOT_ADJACENT_PAIRS(수동 큐레이션)를 대체하는 게 아니라 추가한다 — 이 함수는
     scope_wharf_names로 범위를 한정해서, 울산항 전체 69개 선석 전부에 대해
-    O(n^2) 거리 계산을 하지 않는다. 좌표 결측 선석(S-Oil 부이 2기, 석유공사부이,
-    달포부두 등)은 계산에서 자연히 제외된다.
+    O(n^2) 거리 계산을 하지 않는다. 좌표 결측 선석(S-Oil 부이 2기, 석유공사부이 —
+    해상 계류점이라 안벽 좌표가 없음)은 계산에서 자연히 제외된다.
     """
     have_coords = [
         row for row in batch
@@ -782,7 +786,7 @@ def fetch_anchorage_rows(pg_conn) -> list[dict]:
 # 없으면 온산 부두 전부가 "DWT 미상"으로 정박지 폴백 자체를 계산할 수 없다.
 ONSAN_BERTH_CAPACITY_DWT: dict[str, float] = {
     "OTK1부두": 40000, "OTK2부두": 10000, "UTK부두": 30000, "대한유화부두": 80000,
-    "정일1부두": 40000, "정일2부두": 40000, "효성부두": 30000,
+    "정일1부두": 40000, "정일2부두": 40000, "효성부두": 30000, "달포부두": 3000,
     "S-Oil 1부두": 50000, "S-Oil 2부두": 120000, "S-Oil 3부두": 50000, "S-Oil 4부두": 30000,
     "석유공사부이": 325000, "S-Oil부이": 350000, "S-Oil&오일허브 부이": 325000,
 }
