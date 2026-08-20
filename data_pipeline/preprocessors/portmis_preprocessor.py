@@ -5,7 +5,7 @@ collect_portmis.py로 수집된 PORT-MIS 선박 입출항 원본 데이터를
 전처리하여 data/staging/ 에 CSV로 저장합니다.
 
 PORT-MIS 응답 컬럼 → 표준 컬럼 매핑:
-    prtAgCd          → port_agency_cd       (항만청 코드: 820=울산, 300=온산)
+    prtAgCd          → port_agency_cd       (항만청 코드: 820=울산)
     prtAgNm          → port_agency_nm       (항만청 명칭)
     etryptYear       → entry_year           (입항 연도)
     etryptCo         → entry_count          (입항 횟수: 연간 누적)
@@ -25,8 +25,20 @@ PORT-MIS 응답 컬럼 → 표준 컬럼 매핑:
     nxlnptPrtNm      → next_port_nm         (다음 입항 예정 명)
     dstnNatPrtCd     → dest_port_cd         (최종 목적지 코드)
     dstnPrtNm        → dest_port_nm         (최종 목적지 명)
-    tkoffPrrrnDt     → departure_sched_utc  (출항 예정 일시, 입항 선박용)
-    dstnEtryptDt     → dest_arrival_utc     (목적지 입항 예정 일시, 출항 선박용)
+
+    (2026-08-20) collect_portmis.py가 <details><detail>(입항/출항 이벤트별)를
+    arrival_/departure_ 접두로 이미 평탄화해서 넘긴다 — 예전엔 이 블록 전체가
+    파싱 없이 버려졌다(raw XML 직접 확인으로 재현·수정, 07 문서 §4.4.1 참고):
+    arrival_etryptDt      → arrival_at_utc       (실제 입항 일시)
+    arrival_laidupFcltyCd → arrival_facility_cd  (공식 배정 계선시설 코드)
+    arrival_laidupFcltyNm → arrival_facility_nm  (공식 배정 계선시설 명)
+    arrival_tkoffPrrrnDt  → departure_sched_utc  (입항 시점에 신고한 출항 "예정" 일시)
+    arrival_grtg          → gross_tonnage        (총톤수)
+    arrival_satmntEntrpsNm→ agency_name          (선박대리점)
+    departure_tkoffDt        → departure_at_utc      (실제 출항 일시)
+    departure_laidupFcltyCd  → departure_facility_cd (출항 시점 계선시설 코드)
+    departure_laidupFcltyNm  → departure_facility_nm (출항 시점 계선시설 명)
+    departure_dstnEtryptDt   → dest_arrival_utc      (목적지 입항 예정 일시)
 """
 
 import os
@@ -65,34 +77,102 @@ COLUMN_MAP = {
     "nxlnptPrtNm":       "next_port_nm",
     "dstnNatPrtCd":      "dest_port_cd",
     "dstnPrtNm":         "dest_port_nm",
-    "tkoffPrrrnDt":      "departure_sched_utc",
-    "dstnEtryptDt":      "dest_arrival_utc",
-    "details":           "_details_raw",         # 파싱 후 제거
+    # 입항 이벤트(collect_portmis.py의 arrival_ 접두) — details 파싱 복원(2026-08-20)
+    "arrival_etryptDt":        "arrival_at_utc",
+    "arrival_laidupFcltyCd":   "arrival_facility_cd",
+    "arrival_laidupFcltyNm":   "arrival_facility_nm",
+    "arrival_tkoffPrrrnDt":    "departure_sched_utc",
+    "arrival_grtg":            "gross_tonnage",
+    "arrival_satmntEntrpsNm":  "agency_name",
+    # 출항 이벤트(departure_ 접두) — 아직 출항 전이면 전부 결측으로 남는다(정상)
+    "departure_tkoffDt":       "departure_at_utc",
+    "departure_laidupFcltyCd": "departure_facility_cd",
+    "departure_laidupFcltyNm": "departure_facility_nm",
+    "departure_dstnEtryptDt":  "dest_arrival_utc",
 }
 
-# 선종 코드 → 대분류 라벨 (울산항 주요 선종)
+# tz 오프셋이 붙어 오는 필드(예: "2026-06-01T00:10:00+09:00") — parse_datetime_utc가
+# 그대로 처리 가능.
+_OFFSET_AWARE_DATETIME_COLS = ["arrival_at_utc", "departure_at_utc"]
+
+# tz 오프셋 없이 오는 필드(예: "2026-06-01 04:30:00") — PORT-MIS는 한국 기관이라
+# 이 값들은 KST 기준이다. 그대로 UTC로 해석하면 9시간이 밀린다(2026-08-20 확인 —
+# arrival_at_utc/departure_at_utc와 달리 이 두 필드만 원본에 오프셋이 없다).
+_NAIVE_KST_DATETIME_COLS = ["departure_sched_utc", "dest_arrival_utc"]
+
+
+def _parse_naive_kst_to_utc(df: pd.DataFrame, columns: list) -> pd.DataFrame:
+    df = df.copy()
+    for col in columns:
+        if col not in df.columns:
+            continue
+        parsed = pd.to_datetime(df[col], errors="coerce")
+        if hasattr(parsed.dt, "tz") and parsed.dt.tz is not None:
+            # 이미 tz-aware로 파싱됐으면(예상 밖 포맷) 그대로 UTC 변환만 한다.
+            df[col] = parsed.dt.tz_convert("UTC")
+        else:
+            df[col] = parsed.dt.tz_localize(
+                "Asia/Seoul", ambiguous="NaT", nonexistent="NaT"
+            ).dt.tz_convert("UTC")
+    return df
+
+# 선종 코드 → 대분류 라벨
+# 출처: 해양수산부 PORT-MIS CODE BOOK "03.해사안전(19종) > 가.선박 > 1.선박용도코드"
+# (사용자 제공 공식 문서, 2026-07). 이전엔 실측 데이터에 나타난 코드만으로 매핑을
+# 추정했으나(51=일반화물선 등으로 오인), 이 공식 전체표로 완전히 교체한다.
 SHIP_KIND_CATEGORY = {
-    "51": "일반화물선",
-    "52": "화물/시멘트선",
-    "53": "목재선",
-    "54": "냉동화물선",
-    "55": "LPG선",        # 액체화물
-    "56": "LNG선",        # 액체화물
-    "57": "유조선",       # 액체화물
-    "58": "화학제품선",   # 액체화물
-    "59": "기타화물선",
-    "60": "예인선",
-    "61": "여객선",
-    "62": "고속여객선",
-    "91": "급수선",
-    "92": "급유선",
-    "93": "부선",
-    "94": "크레인선",
-    "95": "작업선",
+    # 여객선
+    "11": "여객선", "12": "화객선",
+    # 화물선
+    "21": "산물선", "22": "양곡운반선", "23": "원목운반선", "24": "광석운반선",
+    "25": "석탄운반선", "26": "시멘트운반선", "27": "자동차운반선",
+    "28": "핫코일운반선", "29": "철강제운반선", "31": "모래운반선",
+    "32": "냉동냉장선", "33": "폐기물운반선", "39": "일반화물선",
+    "41": "풀컨테이너선", "42": "세미컨테이너선",
+    # 유조선 (액체화물)
+    "51": "원유운반선", "52": "석유제품운반선", "53": "케미칼운반선",
+    "54": "케미칼가스운반선", "55": "LPG운반선", "56": "LNG운반선",
+    "57": "석유제품/케미칼겸용", "59": "기타유조선",
+    # 예선
+    "61": "견인용예선", "62": "이접안용예선", "63": "압항예선",
+    "64": "예선", "69": "기타예선",
+    # 부선 (73~75 는 액체화물을 나르는 부선 — 별도 플래그로 취급, 아래 참고)
+    "70": "부선", "71": "모래운반용부선", "72": "철강재운반용부선",
+    "73": "원유운반용부선", "74": "석유제품운반용부선", "75": "화공약품운반용부선",
+    "76": "일반화물운반용부선", "77": "공사작업용부선", "79": "기타부선",
+    # 기타선
+    "81": "관공선", "82": "경찰정", "83": "군함", "91": "연근해어선",
+    "92": "원양어선", "93": "급유선", "94": "급수선", "95": "용달선(통선)",
+    "96": "준설선", "97": "유람선", "98": "도선", "99": "기타선",
 }
 
-# 액체화물(탱커/가스) 선종 코드 세트
-LIQUID_CARGO_KIND_CODES = {"55", "56", "57", "58"}
+# 액체화물 '본선' 선종 코드 (유조선 카테고리 51~59) — 공식 코드표 기준.
+LIQUID_CARGO_KIND_CODES = {"51", "52", "53", "54", "55", "56", "57", "59"}
+
+# 액체화물을 나르는 '부선(바지)' 코드 — 본선과는 성격이 달라(비자항·예인) 별도 플래그.
+# 본선 집계에 합칠지는 팀 판단 필요 (관제 목적상 보통 별도 취급).
+LIQUID_CARGO_BARGE_CODES = {"73", "74", "75"}
+
+# 인화성 액체를 싣지만 '화물선'은 아닌 지원선(급유선 93).
+#
+# 급유선은 다른 배에 연료를 공급하는 서비스 선박이라, 공식 CODE BOOK 도
+# 유조선(5x)이 아니라 '기타선' 그룹에 배치한다. 따라서 is_liquid_cargo_vessel
+# (=액체화물 '본선')에는 넣지 않는다 — 넣으면 하역 스케줄링 대상 척수가
+# 부풀려지고 공식 분류와도 어긋난다.
+#
+# 다만 인화성 유류를 적재한 채 탱커 옆에 접근하므로 **안전관제 관점에서는
+# 무시하면 안 된다**. 그래서 별도 플래그로 표시해 두고, 화면·에이전트가
+# 목적에 따라 선택적으로 포함할 수 있게 한다.
+#   - 하역 스케줄링 통계 → 제외 (기본)
+#   - 화재·인화 위험 관제 → 포함 검토
+# 본선 집계 합산 여부는 팀 판단 필요.
+BUNKERING_VESSEL_CODES = {"93"}
+
+# 선종명(텍스트) 기반 보강 — 코드 체계가 또 바뀌어도 이름으로 액체화물을 포착.
+# '급유'는 의도적으로 넣지 않는다(위 BUNKERING_VESSEL_CODES 주석 참고).
+# '급수선'(94)·'용달선'(95) 등 다른 지원선도 이 키워드에 걸리지 않는다.
+LIQUID_NAME_KEYWORDS = ("유조", "원유", "석유", "케미칼", "화학", "탱커",
+                        "tanker", "LPG", "LNG", "가스", "액체", "황산")
 
 
 def preprocess_portmis():
@@ -125,14 +205,20 @@ def preprocess_portmis():
     # 2. 컬럼명 표준화
     df = cu.standardize_column_names(df, COLUMN_MAP)
 
-    # 3. 불필요 컬럼 제거
-    if "_details_raw" in df.columns:
-        df = df.drop(columns=["_details_raw"])
+    # 2-1. COLUMN_MAP에 없는 원본 필드 제거 — details 파싱 복원(2026-08-20)으로
+    # arrival_/departure_ 접두 원본 필드가 20여 개 추가로 들어오는데, 그중 승무원
+    # 수·예선/도선 여부·화물톤수 세부내역·선박신고번호(mrNum) 등은 지금 이 표(DB)
+    # 스키마에 없다. 이 표는 backend(Alembic) 소유라(auto_create=False) 여기서
+    # 컬럼을 새로 만들 수 없으므로, COLUMN_MAP에서 의도적으로 고른 필드만 남기고
+    # 나머지는 버린다(필요해지면 백엔드 마이그레이션과 함께 다시 추가할 것).
+    # 예전 raw 파일에 남아있던 미파싱 "details" 원문 컬럼도 이 필터로 같이 걸러진다.
+    _known_cols = set(COLUMN_MAP.values())
+    df = df[[c for c in df.columns if c in _known_cols]]
 
-    # 4. 결측값 표준화
+    # 3. 결측값 표준화
     df = cu.normalize_nulls(df)
 
-    # 5. 공통 메타데이터 추가
+    # 4. 공통 메타데이터 추가
     df = cu.add_common_metadata(
         df,
         source_system="PORTMIS",
@@ -140,10 +226,17 @@ def preprocess_portmis():
         is_synthetic=False
     )
 
-    # 6. 숫자형 변환
-    df = cu.to_numeric_safe(df, ["entry_year", "entry_count", "ship_kind_cd"])
+    # 5. 숫자형 변환
+    df = cu.to_numeric_safe(df, ["entry_year", "entry_count", "ship_kind_cd", "gross_tonnage"])
 
-    # 7. 기본키 결측 검증 (호출부호 필수)
+    # 5-1. 시각 파싱 — arrival_at_utc/departure_at_utc는 원본에 +09:00 오프셋이
+    # 붙어 오고(parse_datetime_utc가 그대로 처리), departure_sched_utc/
+    # dest_arrival_utc는 오프셋 없이 KST naive로 오므로 별도 변환이 필요하다
+    # (모듈 docstring, 2026-08-20 details 파싱 복원 참고).
+    df = cu.parse_datetime_utc(df, _OFFSET_AWARE_DATETIME_COLS)
+    df = _parse_naive_kst_to_utc(df, _NAIVE_KST_DATETIME_COLS)
+
+    # 6. 기본키 결측 검증 (호출부호 필수)
     df = cu.flag_missing_key(df, ["callsgn"])
 
     # 8. 선종 대분류 라벨 추가
@@ -155,24 +248,55 @@ def preprocess_portmis():
         .fillna("기타/불명")
     )
 
-    # 9. 액체화물선 여부 플래그
-    df["is_liquid_cargo_vessel"] = (
-        df["ship_kind_cd"]
-        .astype(str)
-        .str.strip()
-        .isin(LIQUID_CARGO_KIND_CODES)
-    )
+    # 9. 액체화물선 '본선' 여부 플래그
+    # 코드 세트 OR 선종명 키워드로 판정 — 코드 체계 변동에 견고.
+    _cd = df["ship_kind_cd"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
+    _by_code = _cd.isin(LIQUID_CARGO_KIND_CODES)
+    if "ship_kind_nm" in df.columns:
+        _pat = "|".join(LIQUID_NAME_KEYWORDS)
+        _by_name = df["ship_kind_nm"].astype(str).str.contains(_pat, case=False, na=False)
+    else:
+        _by_name = False
 
-    # 10. 국내/국제 항로 여부 판단
-    # origin_port_cd가 'KR'로 시작하면 국내 항로
-    df["is_domestic_voyage"] = (
-        df["origin_port_cd"]
-        .fillna("")
-        .str.startswith("KR")
-    )
+    # 부선(73~75)은 이름 키워드에 걸려도 본선으로 세지 않는다.
+    #
+    # 이 가드가 없으면 아래 주석(9-1)이 선언한 "부선은 본선과 분리한다"가 이름 분기
+    # 하나로 무너진다. 실제로 그랬다 —
+    #     73 원유운반용부선   → 이름에 '원유' → 본선으로 샘  ❌
+    #     74 석유제품운반용부선 → 이름에 '석유' → 본선으로 샘 ❌
+    #     75 화공약품운반용부선 → 키워드 없음  → 안 샘        ✅
+    # 같은 부선 3종이 임의로 쪼개져, 코드가 정본인데 이름이 그걸 뒤집는 상태였다.
+    # (급유선 93 에 대해 :113 이 걱정한 "척수가 부풀려진다"가 부선에서 발생)
+    _is_barge = _cd.isin(LIQUID_CARGO_BARGE_CODES)
+    df["is_liquid_cargo_vessel"] = (_by_code | _by_name) & ~_is_barge
+
+    # 9-1. 액체화물 부선(바지) 여부 — 본선과 성격이 달라(비자항) 별도 플래그로 분리.
+    # 관제·통계에서 본선에 합산할지는 팀 판단 필요.
+    df["is_liquid_cargo_barge"] = _cd.isin(LIQUID_CARGO_BARGE_CODES)
+
+    # 9-2. 급유선(지원선) 여부 — 인화성 유류를 싣지만 화물 '본선'은 아니다.
+    # 하역 스케줄링 통계에서는 제외하되, 화재·인화 위험 관제에서는 참조 가능.
+    df["is_bunkering_vessel"] = _cd.isin(BUNKERING_VESSEL_CODES)
+
+    # 10. 국내/국제 항로 여부 판단 — '직전' 출발항 기준
+    #
+    # 예전에는 origin_port_cd(frstDpmprtNatPrtCd = 최초 출발항)를 썼는데, 그건
+    # 이번 항차의 국내/국제가 아니라 그 배가 애초에 어디서 출발했는지다.
+    # 실측(raw 121행) 최초 ≠ 직전이 13건:
+    #     KMTC JAKARTA : 최초 HKHKG(홍콩) / 직전 KRPUS(부산)
+    #       → 이번 구간은 부산→울산 연안인데 '국제'로 판정됐다
+    #     스타 파이오니아 : 최초 KRKAN(광양) / 직전 KRPUS(부산)
+    # 이번 항차를 보려면 prev_port_cd(prvsDpmprtNatPrtCd = 직전 출발항)가 맞다.
+    # 두 컬럼 모두 이미 수집·적재되어 있다(COLUMN_MAP 참고).
+    #
+    # 결측은 False(국제)로 접지 않고 None 으로 둔다 — 모르는 것을 단정하지 않는다는
+    # 이 파이프라인 원칙(quality_flag·identity_confidence 와 같은 취급)에 맞춘다.
+    _prev = df["prev_port_cd"] if "prev_port_cd" in df.columns else pd.Series(index=df.index, dtype=object)
+    _prev_s = _prev.astype("string").str.strip()
+    df["is_domestic_voyage"] = _prev_s.str.startswith("KR").astype("boolean")
 
     # 11. 항만청 이름 코드 기반으로 명시적 레이블링
-    port_cd_map = {"820": "울산항", "300": "온산항"}
+    port_cd_map = {"820": "울산항"}
     df["port_agency_label"] = (
         df["port_agency_cd"]
         .astype(str)
@@ -183,7 +307,6 @@ def preprocess_portmis():
     # 12. 요약 출력
     print(f"\n  전처리 후 행 수       : {len(df)}")
     print(f"  울산항 건수           : {(df['port_agency_cd'].astype(str) == '820').sum()}")
-    print(f"  온산항 건수           : {(df['port_agency_cd'].astype(str) == '300').sum()}")
     print(f"  액체화물선 건수       : {df['is_liquid_cargo_vessel'].sum()}")
     print(f"  국내 항로 건수        : {df['is_domestic_voyage'].sum()}")
     print(f"  키 결측(MISSING_KEY)  : {(df['quality_flag'] == 'MISSING_KEY').sum()}")

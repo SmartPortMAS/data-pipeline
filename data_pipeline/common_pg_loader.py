@@ -45,8 +45,12 @@ load_dotenv()
 
 STAGING_DIR = "data/staging"
 
-# 해시(record_uid)에서 제외할 컬럼 (실행마다 바뀌는 값)
-VOLATILE_COLS = ["collected_at_utc"]
+# 해시(record_uid)에서 제외할 컬럼 (실행마다/재수집마다 바뀌는 값)
+# - collected_at_utc: 우리 수집 시각
+# - updated_at_utc / job_at_utc: 원천 시스템(관제 등)의 갱신·배치 시각.
+#   내용이 같아도 재수집 때마다 바뀌므로 해시에 넣으면 같은 논리 레코드가
+#   이틀에 걸친 수집에서 다른 record_uid 로 중복 적재된다.
+VOLATILE_COLS = ["collected_at_utc", "updated_at_utc", "job_at_utc"]
 
 
 def get_engine() -> Engine:
@@ -106,13 +110,68 @@ def _ensure_table(engine: Engine, table: str, df: pd.DataFrame, unique_cols: lis
     print(f"  - 테이블 생성: {table} (유니크 키: {unique_cols})")
 
 
+def _ensure_unique_index(engine: Engine, table: str, unique_cols: list) -> None:
+    """기존 테이블에 unique_cols 를 커버하는 유니크 인덱스를 보장한다.
+
+    ON CONFLICT (unique_cols) 는 해당 컬럼 조합의 유니크 인덱스가 있어야 동작한다.
+    TABLE_MAP 의 키를 record_uid → 자연키로 바꾸는 등 키 체계가 변경되면
+    기존 테이블에는 새 키의 인덱스가 없으므로 여기서 만들어 준다.
+    인덱스 생성 전, 키 변경 이전에 쌓인 중복 행을 정리한다
+    (같은 키 중 collected_at_utc 최신 1행만 유지 — 재수집 중복 정리와 동일 의미).
+    """
+    insp = inspect(engine)
+    target = set(unique_cols)
+    for idx in insp.get_indexes(table):
+        if idx.get("unique") and set(idx.get("column_names") or []) == target:
+            return
+    pk = insp.get_pk_constraint(table)
+    if pk and set(pk.get("constrained_columns") or []) == target:
+        return
+
+    col_list = ", ".join(f'"{c}"' for c in unique_cols)
+    has_collected = any(c["name"] == "collected_at_utc" for c in insp.get_columns(table))
+    order_by = 'ORDER BY collected_at_utc DESC NULLS LAST, ctid DESC' if has_collected else 'ORDER BY ctid DESC'
+    idx_name = f"{table}_uidx__" + "__".join(unique_cols)
+    with engine.begin() as conn:
+        dedup_sql = (
+            f'DELETE FROM "{table}" d USING ('
+            f'  SELECT ctid, row_number() OVER (PARTITION BY {col_list} {order_by}) AS rn'
+            f'  FROM "{table}"'
+            f') r WHERE d.ctid = r.ctid AND r.rn > 1;'
+        )
+        deleted = conn.execute(text(dedup_sql)).rowcount
+        conn.execute(text(
+            f'CREATE UNIQUE INDEX IF NOT EXISTS "{idx_name}" ON "{table}" ({col_list})'
+        ))
+    if deleted:
+        print(f"  - 키 체계 변경: {table} 기존 중복 {deleted}행 정리 후 유니크 인덱스 생성 ({unique_cols})")
+    else:
+        print(f"  - 유니크 인덱스 생성: {table} ({unique_cols})")
+
+
 def upsert_dataframe(
     engine: Engine, table: str, df: pd.DataFrame, unique_cols: list, auto_create: bool = True,
 ) -> int:
     """임시 테이블 경유 UPSERT (ON CONFLICT unique_cols)."""
     if df.empty:
         return 0
+
+    # 배치 내 키 중복 제거 — 같은 INSERT 문 안에 동일 유니크 키가 두 번 들어가면
+    # PostgreSQL 이 CardinalityViolation("cannot affect row a second time")을 낸다.
+    #
+    # 이 방어는 원래 load_csv() 에만 있었다. 그런데 upsert_dataframe() 은
+    # 공개 함수라 CSV 를 거치지 않는 호출자(전처리 결과를 DataFrame 째로 넣는
+    # 코드, 테스트, 마트 적재기)가 직접 부른다. 그 경로는 무방비였다.
+    # 방어는 우회 가능한 상위가 아니라 실제로 SQL 을 만드는 이 계층에 있어야 한다.
+    # (load_csv 의 기존 dedup 은 그대로 두어도 무해하다 — 여기서 한 번 더 걸린다)
+    if unique_cols and all(c in df.columns for c in unique_cols):
+        before = len(df)
+        df = df.drop_duplicates(subset=unique_cols, keep="last").reset_index(drop=True)
+        if len(df) < before:
+            print(f"  - 배치 내 키 중복 {before - len(df)}행 제거 ({table}, 키: {unique_cols})")
+
     _ensure_table(engine, table, df, unique_cols, auto_create)
+    _ensure_unique_index(engine, table, unique_cols)
 
     cols = list(df.columns)
     tmp = f"_tmp_{table}"
@@ -132,24 +191,38 @@ def upsert_dataframe(
     return len(df)
 
 
-def load_csv(engine: Engine, csv_path: str, table: str, unique_cols: list, auto_create: bool = True) -> int:
+def load_csv(
+    engine: Engine, csv_path: str, table: str, unique_cols: list,
+    auto_create: bool = True, row_filter=None,
+) -> int:
     df = pd.read_csv(csv_path)
     if df.empty:
-        print(f"[SKIP] {csv_path} 비어 있음")
+        print(f"[SKIP] {csv_path} empty")
         return 0
-    # _utc 컬럼을 datetime으로 파싱 — 문자열 그대로 두면 임시 테이블이 TEXT로
-    # 생성되어 Alembic이 TIMESTAMPTZ로 만든 실제 테이블과 타입이 안 맞아 upsert가 실패한다.
+    # 적재 직전 행 필터 — 원천(수집기)이 이미 고쳐졌지만 배포가 늦어 옛 산출물이
+    # 계속 내려오는 기간에, 잘못된 행이 DB로 재유입되는 것을 막는 방어선.
+    if row_filter is not None:
+        df = row_filter(df)
+        if df.empty:
+            print(f"[SKIP] {csv_path} 필터 후 0행")
+            return 0
     for col in df.columns:
         if col.endswith("_utc"):
             df[col] = pd.to_datetime(df[col], utc=True, errors="coerce")
     if unique_cols == ["record_uid"]:
         df = add_record_uid(df)
+    else:
+        # batch dedup: same unique key twice in one INSERT
+        # causes ON CONFLICT DO UPDATE CardinalityViolation
+        df = df.drop_duplicates(subset=unique_cols, keep="last").reset_index(drop=True)
     n = upsert_dataframe(engine, table, df, unique_cols, auto_create)
     print(f"[OK] {os.path.basename(csv_path)} -> {table} ({n} rows upsert)")
     return n
 
 
-def load_all(table_map: dict, staging_dir: str = STAGING_DIR, auto_create: bool = True) -> None:
+def load_all(
+    table_map: dict, staging_dir: str = STAGING_DIR, auto_create: bool = True, row_filter=None,
+) -> None:
     """staging 폴더의 CSV 를 table_map 에 맞춰 PostgreSQL 에 적재한다.
 
     Args:
@@ -166,5 +239,5 @@ def load_all(table_map: dict, staging_dir: str = STAGING_DIR, auto_create: bool 
         if not entry:
             continue  # table_map 에 없는 파일은 건너뜀
         table, unique_cols = entry
-        total += load_csv(engine, csv_path, table, unique_cols, auto_create)
+        total += load_csv(engine, csv_path, table, unique_cols, auto_create, row_filter=row_filter)
     print(f"[DONE] 총 {total} rows 적재 완료")

@@ -45,15 +45,6 @@ def job_position_and_nvgt():
         print(f"[ERROR] 선박위치/운항정보 수집 실패(직전 데이터 유지): {e}")
 
 
-def job_unload():
-    """하역정보 (하루 1회)."""
-    try:
-        UpaClient().collect_unload_record()
-        upa.run_pipeline("unload_record", [f"{RAW}/upa_unload_record_raw.json"])
-    except Exception as e:  # noqa: BLE001
-        print(f"[ERROR] 하역정보 수집 실패: {e}")
-
-
 def job_master():
     """부두/정박지 (하루 1회면 충분, 거의 고정)."""
     try:
@@ -70,14 +61,11 @@ def main():
     sched = BlockingScheduler(timezone="Asia/Seoul")
     # 변동 데이터: 10분마다
     sched.add_job(job_position_and_nvgt, "interval", minutes=10, id="position_nvgt")
-    # 하역정보: 매일 04:10
-    sched.add_job(job_unload, "cron", hour=4, minute=10, id="unload")
     # 마스터(부두/정박지): 매일 04:20
     sched.add_job(job_master, "cron", hour=4, minute=20, id="master")
 
     print("스케줄러 시작 (Ctrl+C 종료). 시작 시 1회 즉시 실행합니다.")
     job_master()
-    job_unload()
     job_position_and_nvgt()
     try:
         sched.start()

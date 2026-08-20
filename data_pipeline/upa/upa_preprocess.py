@@ -2,12 +2,11 @@
 """
 울산항만공사(UPA) Open API 전처리 파이프라인 (담당: 함현우)
 
-대상 API (6종)
+대상 API (5종)
   1. 항만 내 선박 운항정보 (getVtsBaseVslNvgtInfo)  -> upa_port_call_stg.csv
   2. 항내 선박위치정보      (getVslPstnInfo)          -> upa_vessel_position_stg.csv
   3-1. 통합화물 정보        (getIntgCagInfo)          -> upa_cargo_manifest_stg.csv
   3-2. 내항화물 정보        (getInprtCagDclrInfo)     -> upa_cargo_manifest_stg.csv (concat)
-  4. 선박 하역정보          (getUnloadRcdInfo)        -> upa_unload_record_stg.csv
   5-1. 부두(항만시설) 정보  (getGisBaseHrbrFcltDtlInfo) -> upa_berth_facility_stg.csv
   5-2. 정박지 정보          (getGisBaseAnchrgDtlInfo)   -> upa_anchorage_stg.csv
 
@@ -17,6 +16,7 @@
 """
 import os
 import json
+import re
 
 import numpy as np
 import pandas as pd
@@ -155,6 +155,8 @@ def preprocess_vessel_position(df: pd.DataFrame, is_synthetic: bool = False) -> 
     """2. 항내 선박위치정보 -> 선박 위치."""
     spec = cfg.VSL_PSTN_INFO
     df = _apply_common(df, spec, is_synthetic)
+    # MMSI-First 선박 고유키 — UPSERT 자연키(key_cols)가 이 컬럼을 쓴다.
+    df = common.create_vessel_uid(df)
     df = common.create_port_call_id(df)
     df = common.flag_missing_key(df, spec["key_cols"])
     df = common.flag_ulsan_bbox(df)
@@ -183,22 +185,55 @@ def preprocess_inprt_cargo(df: pd.DataFrame, is_synthetic: bool = False) -> pd.D
     return df
 
 
-def preprocess_unload_record(df: pd.DataFrame, is_synthetic: bool = False) -> pd.DataFrame:
-    """4. 선박 하역정보 -> 하역 기록."""
-    spec = cfg.UNLOAD_RCD_INFO
-    df = _apply_common(df, spec, is_synthetic)
-    df = common.flag_missing_key(df, spec["key_cols"])
-    for start_col, end_col in spec.get("date_order_pairs", []):
-        df = common.validate_date_order(df, start_col, end_col)
+# UPA getGisBaseHrbrFcltDtlInfo dow(수심) 필드가 종종 "N-M" 또는 "N,M" 범위로
+# 온다(실측 2026-08-17, 69개 중 5개: 북신항 에너지부두 '9-15', 2부두 '9,12',
+# SK5부두 '7-11', 신항컨부두/용연부두 '12-14'). 이걸 그대로 두면
+# common_preprocessing.to_numeric_safe의 콤마 제거(berth_capacity 등 천단위
+# 구분자 처리용으로는 맞는 동작)를 타면서 '9,12' -> '912'처럼 완전히 다른
+# 숫자로 뭉개진다(2부두 depth_m=912였던 사고 원인) — 하이픈 범위는 float
+# 변환 자체가 실패해 NaN이 된다. _apply_common(콤마 제거 포함)이 돌기 전에
+# 여기서 먼저 범위를 하한값으로 정리한다. 하한(얕은 쪽) 채택 이유는
+# mart_views.sql msds_flat.flash_point_celsius 파싱과 같은 원칙 —
+# "범위는 하한 = 보수적, 얕을수록/위험할수록 안전 마진을 작게 본다".
+_DEPTH_RANGE_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[-,]\s*\d+(?:\.\d+)?\s*$")
+
+
+def _resolve_depth_range(raw) -> object:
+    if not isinstance(raw, str):
+        return raw
+    m = _DEPTH_RANGE_PATTERN.match(raw)
+    return m.group(1) if m else raw
+
+
+def _apply_depth_range_fix(df: pd.DataFrame) -> pd.DataFrame:
+    """dow 원본 컬럼(표준화 전) 대상. standardize_column_names보다 먼저 불러야 한다."""
+    if "dow" not in df.columns:
+        return df
+    df = df.copy()
+    df["dow"] = df["dow"].apply(_resolve_depth_range)
+    return df
+
+
+# 범위 표기가 아닌 단독 오류값(파이프라인 버그 아님, raw JSON에 이미
+# "dow": "140" 그대로 들어있음, 2026-08-17 실측) — 위 범위 정리로는 못 잡는다.
+# 원본 파일(data/raw)은 원본 보존 원칙상 고치지 않고 여기서만 보정한다.
+# 소수점 오탈자로 추정(같은 신항 구역 인근 부두들이 전부 14m대이고, 140m는
+# 이 항 실제 최대 수심(27m대)조차 크게 넘어 물리적으로 불가능한 값).
+def _apply_known_depth_overrides(df: pd.DataFrame) -> pd.DataFrame:
+    if "wharf_name" in df.columns and "depth_m" in df.columns:
+        df = df.copy()
+        df.loc[df["wharf_name"] == "LS MNM 신항부두", "depth_m"] = 14.0
     return df
 
 
 def preprocess_berth_facility(df: pd.DataFrame, is_synthetic: bool = False) -> pd.DataFrame:
     """5-1. 부두(항만시설) 정보 -> 부두."""
     spec = cfg.HRBR_FCLT_INFO
+    df = _apply_depth_range_fix(df)
     df = _apply_common(df, spec, is_synthetic)
     df = common.flag_missing_key(df, spec["key_cols"])
     df = common.flag_ulsan_bbox(df)
+    df = _apply_known_depth_overrides(df)
     return df
 
 
@@ -229,7 +264,6 @@ PIPELINES = {
     "vessel_position": (preprocess_vessel_position, cfg.VSL_PSTN_INFO),
     "intg_cargo": (preprocess_intg_cargo, cfg.INTG_CAG_INFO),
     "inprt_cargo": (preprocess_inprt_cargo, cfg.INPRT_CAG_DCLR_INFO),
-    "unload_record": (preprocess_unload_record, cfg.UNLOAD_RCD_INFO),
     "berth_facility": (preprocess_berth_facility, cfg.HRBR_FCLT_INFO),
     "anchorage": (preprocess_anchorage, cfg.ANCHRG_INFO),
 }
@@ -310,7 +344,6 @@ if __name__ == "__main__":
     examples = {
         "vessel_nvgt": [f"{base}/upa_vessel_nvgt_raw.json"],
         "vessel_position": [f"{base}/upa_vessel_position_raw.json"],
-        "unload_record": [f"{base}/upa_unload_record_raw.json"],
         "berth_facility": [f"{base}/upa_berth_facility_raw.json"],
         "anchorage": [f"{base}/upa_anchorage_raw.json"],
     }

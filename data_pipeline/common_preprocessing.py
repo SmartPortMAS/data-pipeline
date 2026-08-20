@@ -21,12 +21,14 @@ import numpy as np
 # (API마다 결측값 표현이 다르기 때문에 하나의 기준으로 통일)
 NULL_VALUES = ["", " ", "null", "NULL", "None", "none", "-", "N/A", "nan", "NaN"]
 
-# 울산항 1차 관제 범위
-# (AIS, 항내 선박위치, 정박지, 부두 위치 검증에 공통 적용)
-ULSAN_LAT_MIN = 35.30
-ULSAN_LAT_MAX = 35.58
-ULSAN_LON_MIN = 129.18
-ULSAN_LON_MAX = 129.52
+# 울산항 1차 관제 범위 (2026-07 실측 재조정)
+# 실측 517건 분석: 기존 범위는 북쪽 접근항로(~35.85)·외해 수역(~129.77)의
+# 선박 27.5%를 OUT_OF_ULSAN_BBOX 로 오분류. 아래 값은 부두·정박지 100% +
+# 항내 선박위치 98.6% 커버 (근거: checks/check_bbox_coverage.py 실행 결과)
+ULSAN_LAT_MIN = 35.18
+ULSAN_LAT_MAX = 35.82
+ULSAN_LON_MIN = 129.22
+ULSAN_LON_MAX = 129.76
 
 
 def normalize_nulls(df: pd.DataFrame) -> pd.DataFrame:
@@ -87,10 +89,15 @@ def parse_datetime_utc(df: pd.DataFrame, columns: list) -> pd.DataFrame:
     UTC 시간 파싱 함수
     (AISStream의 TimeUtc처럼 이미 UTC 기준인 시간을 datetime으로 변환)
     format="mixed": 행마다 형식이 달라도 추론, "Could not infer format" 경고 제거.
+    AISStream TimeUtc는 "... +0000 UTC" 접미사가 붙어 pd.to_datetime이 파싱하지
+    못하므로(NaT → MISSING_KEY 오탐) 문자열 컬럼은 접미사를 제거한 뒤 파싱한다.
     """
     df = df.copy()
     for col in columns:
         if col in df.columns:
+            if df[col].dtype == object or df[col].dtype.name in ('object', 'str', 'string'):
+                # '+0000 UTC' 접미사가 붙어 있는 경우 제거하여 pd.to_datetime이 올바르게 파싱하도록 처리
+                df[col] = df[col].astype(str).str.replace(r"\s*\+0000\s*UTC", "", regex=True)
             df[col] = pd.to_datetime(df[col], errors="coerce", utc=True, format="mixed")
     return df
 
@@ -153,6 +160,82 @@ def flag_ulsan_bbox(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[missing_coord | zero_coord, "quality_flag"] = "MISSING_COORDINATE"
     df.loc[~missing_coord & ~zero_coord & outside_bbox, "quality_flag"] = "OUT_OF_ULSAN_BBOX"
 
+    return df
+
+
+def create_vessel_uid(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    선박 고유키(vessel_uid) 생성 — MMSI-First.
+
+    [왜 필요한가]
+    마트 뷰(mart.vessel_identity)는 이미 MMSI-First 로 선박을 식별하는데,
+    적재 계층(UPSERT 자연키)은 여전히 callsgn 을 쓰고 있었다. 그 결과
+    같은 시스템 안에 선박 식별 기준이 2개 존재했고, 다음 버그를 낳았다:
+
+      PostgreSQL 유니크 인덱스는 NULL 을 "서로 다른 값"으로 취급한다.
+      → callsgn 이 NULL 인 행은 ON CONFLICT 에 절대 걸리지 않는다.
+      → 호출부호 미송출 선박은 6분 폴링마다 새 행이 통째로 INSERT 된다.
+      (실증: 폴링 3회 시 callsgn 보유 선박 1행 / callsgn NULL 선박 3행)
+
+    식별 키는 최하위 계층에서 한 번 정하고 위로 전파되어야 한다.
+    이 함수가 그 단일 기준점이다.
+
+    [우선순위]
+      1) MMSI      — UPA VslPstnInfo 의 mmsiNo. 결측률 0%가 관측된 주 식별자
+      2) 'CS:'+호출부호 — MMSI 조차 없을 때의 대체
+      3) 'ANON:'+해시  — 둘 다 없을 때. 위치·시각 기반 결정적(deterministic)
+                        해시라 같은 관측을 재수집해도 같은 값 → 멱등 유지
+
+    3)이 없으면 vessel_uid 가 NULL 이 되어 애초의 NULL 중복 버그가 그대로
+    재발한다. 'ANON:' 은 식별을 포기하되 멱등성은 지키기 위한 장치다.
+    """
+    import hashlib
+
+    df = df.copy()
+
+    for col in ["mmsi", "callsgn"]:
+        if col not in df.columns:
+            df[col] = np.nan
+
+    # MMSI 는 numeric_cols 를 거치며 float 이 되어 '224998000.0' 처럼 찍힌다.
+    # 소수점을 떼어 정수 문자열로 정규화한다.
+    mmsi_str = (
+        pd.to_numeric(df["mmsi"], errors="coerce")
+        .astype("Float64")
+        .apply(lambda v: "" if pd.isna(v) else str(int(v)))
+    )
+    # ★ fillna("") 를 먼저 해야 한다. pandas 의 astype(str) 은 object dtype 의
+    #   NaN 을 문자열로 바꾸지 않고 그대로 두고, 이어지는 .str 접근자는 NaN 을
+    #   전파한다. 그러면 아래 replace 가 걸리지 않아 식별정보가 전혀 없는 행이
+    #   ANON 분기로 가지 못하고 vessel_uid 가 NaN 이 된다 (원래 고치려던 그 버그).
+    cs_str = df["callsgn"].fillna("").astype(str).str.strip().str.upper()
+    cs_str = cs_str.replace(list(NULL_VALUES) + ["NAN", "<NA>"], "", regex=False)
+
+    uid = pd.Series([""] * len(df), index=df.index, dtype=object)
+    src = pd.Series([""] * len(df), index=df.index, dtype=object)
+
+    has_mmsi = mmsi_str != ""
+    uid[has_mmsi] = mmsi_str[has_mmsi]
+    src[has_mmsi] = "MMSI"
+
+    has_cs = ~has_mmsi & (cs_str != "")
+    uid[has_cs] = "CS:" + cs_str[has_cs]
+    src[has_cs] = "CALLSIGN"
+
+    anon = ~has_mmsi & ~has_cs
+    if anon.any():
+        def _anon_key(idx):
+            parts = []
+            for c in ("latitude", "longitude", "received_at_utc"):
+                parts.append(str(df.at[idx, c]) if c in df.columns else "")
+            return "ANON:" + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+
+        uid[anon] = [_anon_key(i) for i in df.index[anon]]
+        src[anon] = "ANON"
+        df.loc[anon, "quality_flag"] = "MISSING_VESSEL_IDENTITY"
+
+    df["vessel_uid"] = uid
+    df["vessel_uid_source"] = src
     return df
 
 
@@ -254,3 +337,23 @@ def save_staging_csv(df: pd.DataFrame, output_path: str) -> None:
     """
     df.to_csv(output_path, index=False, encoding="utf-8-sig")
     print(f"[저장 완료] {output_path}  ({len(df):,}행)")
+
+
+def haversine_distance_nm(lat1, lon1, lat2, lon2):
+    """
+    두 위도/경도 좌표 간의 대원 거리(Great-Circle Distance)를 해리(Nautical Mile, NM) 단위로 계산합니다.
+    """
+    R = 3440.065
+
+    rad_lat1 = np.radians(lat1)
+    rad_lon1 = np.radians(lon1)
+    rad_lat2 = np.radians(lat2)
+    rad_lon2 = np.radians(lon2)
+
+    dlat = rad_lat2 - rad_lat1
+    dlon = rad_lon2 - rad_lon1
+
+    a = np.sin(dlat / 2.0)**2 + np.cos(rad_lat1) * np.cos(rad_lat2) * np.sin(dlon / 2.0)**2
+    c = 2.0 * np.arcsin(np.sqrt(a))
+
+    return R * c
