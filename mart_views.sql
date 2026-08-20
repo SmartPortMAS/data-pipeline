@@ -680,6 +680,19 @@ LEFT JOIN departed_doc  d ON d.callsgn = l.callsgn;
 -- 3. mart.port_call_overview — 입항 통합 (입항건당 대표 1행)
 --    PORT-MIS 입출항 신고 + UPA 운항관제(접안 부두·일시) + UPA 화물 manifest
 --    요약(품목 수 / B/L 수 / 위험물 UN 번호)을 callsgn 으로 결합한다.
+--
+-- ★ 2026-08-20 수정 — portmis_vessel 미등재 선박의 VTS 실측 입출항시각 유실
+--   이전엔 FROM pm_latest(portmis_vessel) 기준으로 pc_latest(upa_port_call)를
+--   LEFT JOIN했다. portmis_vessel은 96행뿐인데 VTS(upa_port_call)에는 실제
+--   입항 기록이 있는 선박이 572척이나 더 있어서(실측 확인, 2026-08-20), 그
+--   572척은 이 뷰에 아예 행이 안 생겨 arrival_at_utc가 NULL로 나갔다 — VTS에
+--   입항시각이 멀쩡히 있는데도 dashboard_current/port_call_overview 소비자
+--   (arrival_watcher, orchestrator.py assess-and-commit 등)에게는 "모름"으로
+--   보였다. 그 결과 관제사가 콘솔에서 승인한 배정의 actual_berthing_at이 거의
+--   항상 NULL로 남고, 화면은 그 대신 planned_window(콘솔이 항상 "지금"으로
+--   보내는 계획값)를 "(예정)"으로 표시해 "입항시간이 전부 현재시각"처럼 보였다.
+--   FULL OUTER JOIN으로 바꿔 VTS만 있는 선박도 자기 행을 갖게 한다 — PORT-MIS
+--   신고 필드(entry_purpose_nm 등)는 없으면 그냥 NULL(추측하지 않음).
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.port_call_overview AS
 WITH pm_latest AS (
@@ -744,31 +757,52 @@ cargo_sum AS (
      AND lv.voyage_no IS NOT DISTINCT FROM cm.voyage_no
     WHERE cm.callsgn IS NOT NULL
     GROUP BY upper(trim(cm.callsgn))
+),
+combined AS (
+    -- VTS(upa_port_call) 실측만 있고 PORT-MIS 신고가 없는 선박도 자기 행을
+    -- 갖도록 FULL OUTER JOIN — callsgn은 두 쪽 다 없을 수 없으므로(WHERE로
+    -- 이미 NULL 제외) COALESCE로 하나의 식별 키로 합친다.
+    SELECT COALESCE(pm.callsgn, pc.callsgn)    AS callsgn,
+           pm.entry_year,
+           pm.entry_count,
+           pm.entry_purpose_nm,
+           pm.origin_port_nm,
+           pm.prev_port_nm,
+           pm.next_port_nm,
+           pm.dest_port_nm,
+           pm.is_domestic_voyage,
+           pm.port_agency_label,
+           pc.port_call_id,
+           pc.arrival_at_utc,
+           pc.departure_at_utc,
+           pc.facility_name,
+           pc.io_vts_name
+    FROM pm_latest pm
+    FULL OUTER JOIN pc_latest pc ON pc.callsgn = pm.callsgn
 )
 SELECT
-    pm.callsgn,
-    pm.entry_year,
-    pm.entry_count,
-    pm.entry_purpose_nm,
-    pm.origin_port_nm,
-    pm.prev_port_nm,
-    pm.next_port_nm,
-    pm.dest_port_nm,
-    pm.is_domestic_voyage,
-    pm.port_agency_label,
-    pc.port_call_id,
-    pc.arrival_at_utc,
-    pc.departure_at_utc,
-    pc.facility_name,
-    pc.io_vts_name,
+    combined.callsgn,
+    combined.entry_year,
+    combined.entry_count,
+    combined.entry_purpose_nm,
+    combined.origin_port_nm,
+    combined.prev_port_nm,
+    combined.next_port_nm,
+    combined.dest_port_nm,
+    combined.is_domestic_voyage,
+    combined.port_agency_label,
+    combined.port_call_id,
+    combined.arrival_at_utc,
+    combined.departure_at_utc,
+    combined.facility_name,
+    combined.io_vts_name,
     cs.cargo_item_count,
     cs.bl_count,
     cs.dg_cargo_count,
     cs.dg_un_nos,
     cs.cargo_names
-FROM pm_latest pm
-LEFT JOIN pc_latest pc ON pc.callsgn = pm.callsgn
-LEFT JOIN cargo_sum cs ON cs.callsgn = pm.callsgn;
+FROM combined
+LEFT JOIN cargo_sum cs ON cs.callsgn = combined.callsgn;
 
 -- ---------------------------------------------------------------------------
 -- 3-1. mart.msds_flat — msds_chemical(JSONB) → 안전관제용 평면 뷰

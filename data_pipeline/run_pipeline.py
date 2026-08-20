@@ -186,12 +186,15 @@ def run_port_call() -> None:
 
 
 def run_portmis(start_date: str | None = None, end_date: str | None = None) -> None:
-    from data_pipeline.collectors.portmis_collector import collect_portmis
+    from data_pipeline.collectors.portmis_collector import collect_portmis, resolve_incremental_start_date
     from data_pipeline.loaders.portmis_pg_loader import load as load_portmis
     from data_pipeline.preprocessors.portmis_preprocessor import preprocess_portmis
 
     today = datetime.datetime.now().strftime("%Y%m%d")
-    start_date = start_date or today
+    # --start를 안 주면 "오늘부터"가 아니라 "마지막 수집 이후로 이어붙이기"가 기본이다
+    # (2026-08-19) — 매일 이 명령을 그대로 재실행해도 그날그날 새로 입항한 건만
+    # 자동으로 누적되도록 하기 위함(portmis_collector.py 모듈 docstring 참고).
+    start_date = start_date or resolve_incremental_start_date()
     end_date = end_date or today
 
     print(f"=== [portmis] 1/3 수집 ({start_date} ~ {end_date}) ===")
@@ -244,6 +247,23 @@ def _refresh_materialized_views() -> None:
     print(f"  - mart.facility_alias 갱신 완료 ({n}종, 미매핑 {unmapped}종)")
 
 
+def run_vessel_spec() -> None:
+    """해양수산부 선박제원정보 수집 — portmis_vessel_stg.csv의 distinct callsgn을
+    순회 조회한다(08_스케줄링_전면재설계_자동배정_설계문서.md §5.2.1-A). portmis
+    도메인이 먼저 돌아 staging이 최신이어야 의미가 있으므로 DOMAINS 순서상 portmis
+    바로 뒤에 둔다."""
+    from data_pipeline.collectors.vessel_spec_collector import collect_and_save
+    from data_pipeline.loaders.vessel_spec_pg_loader import load as load_vessel_spec
+    from data_pipeline.preprocessors.vessel_spec_preprocessor import preprocess_vessel_spec
+
+    print("=== [vessel_spec] 1/3 수집 ===")
+    collect_and_save()
+    print("=== [vessel_spec] 2/3 전처리 ===")
+    preprocess_vessel_spec()
+    print("=== [vessel_spec] 3/3 DB 적재 ===")
+    _load(load_vessel_spec)
+
+
 def run_mart() -> None:
     """staging 산출물을 결합해 통합 마트를 만들고 DB에 적재한다.
 
@@ -279,6 +299,7 @@ DOMAINS = {
     "vessel": run_vessel,  # 선박위치 (UPA getVslPstnInfo) — 구 ais 도메인 대체
     "port_call": run_port_call,  # 입출항 이력 (UPA getVtsBaseVslNvgtInfo) — 선박위치 뒤에 실행
     "portmis": run_portmis,
+    "vessel_spec": run_vessel_spec,  # portmis 뒤에 실행 — 그 staging의 callsgn을 씀
     "mart": run_mart,  # 파생 도메인 — 반드시 마지막 (staging 산출물 필요)
 }
 
