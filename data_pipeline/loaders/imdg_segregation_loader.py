@@ -137,7 +137,22 @@ def _build_segregation_table() -> dict[tuple[str, str], str]:
     return table
 
 
+def _build_no_segregation_pairs() -> set[tuple[str, str]]:
+    """공인 표상 "X"(격리 불필요 — 모호함이 아니라 확정된 안전 답변)인 (class_a, class_b)
+    조합. "*"(폭발물류 특칙, 이번 34~36종 화물에는 Class 1이 없어 해당 없음)는 제외한다
+    — "*"는 "불필요"가 아니라 "표에서 별도 규정 참조"라 X와 성격이 달라, 안전측으로
+    여기 포함하지 않고 여전히 미확인으로 남겨 둔다."""
+    pairs: set[tuple[str, str]] = set()
+    for i, row_str in enumerate(_RAW_ROWS):
+        values = row_str.split()
+        for j, code in enumerate(values):
+            if code == "X":
+                pairs.add((_CLASSES[i], _CLASSES[j]))
+    return pairs
+
+
 IMDG_GENERAL_SEGREGATION_TABLE: dict[tuple[str, str], str] = _build_segregation_table()
+IMDG_NO_SEGREGATION_PAIRS: set[tuple[str, str]] = _build_no_segregation_pairs()
 
 
 def _normalize_class(raw: str | None) -> str | None:
@@ -151,6 +166,28 @@ _NEO4J_CONSTRAINT_STMTS: list[str] = [
     "CREATE CONSTRAINT imdg_class_code_unique IF NOT EXISTS "
     "FOR (i:ImdgClass) REQUIRE i.code IS UNIQUE",
 ]
+
+# 2026-08-21 추가 — "X"(공인 표상 격리 불필요) 조합도 명시적으로 그래프에 남긴다.
+# 배경: 안전관제 에이전트는 "SEGREGATE 관계 없음"을 "코드 X인지, 이 Class 조합이
+# 그래프에 아예 없는지 구분 못 함"으로 보고 최소 주의로 격상하는 fail-safe를 쓴다
+# (backend/app/agents/safety/rule_engine.py의 compute_imdg_unconfirmed_floor).
+# 그런데 실측 확인 결과 이 프로젝트가 다루는 34~36종 대부분이 Class "3"(인화성
+# 액체) 하나에 몰려 있고(19종), IMDG 공인 표는 **모든 Class가 자기 자신과는
+# 예외 없이 X**다(같은 등급끼리는 격리 불필요 — 17개 Class 대각선 전부 확인).
+# 즉 "같은 Class끼리"는 절대 모호하지 않은 확정된 안전 답변인데, 기존 구조로는
+# 이것도 "미확인"으로 오분류돼 같은 Class 화물끼리(예: 벤젠-가솔린, 둘 다
+# Class 3)마다 불필요한 "주의" 경고가 스팸처럼 발생했다. 이 관계를 명시적으로
+# 적재해서, 안전관제 에이전트가 "SEGREGATE도 없고 이 관계도 없는" 진짜 커버리지
+# 밖 조합만 미확인으로 다루게 한다.
+_CYPHER_MERGE_NO_SEGREGATION_REQUIRED = """
+UNWIND $batch AS row
+MATCH (a:ImdgClass {code: row.class_a})
+MATCH (b:ImdgClass {code: row.class_b})
+MERGE (a)-[r1:NO_SEGREGATION_REQUIRED]->(b)
+ON CREATE SET r1.created_at = datetime()
+MERGE (b)-[r2:NO_SEGREGATION_REQUIRED]->(a)
+ON CREATE SET r2.created_at = datetime()
+"""
 
 
 def ensure_neo4j_schema(driver) -> None:
@@ -228,6 +265,10 @@ def _tx_merge_segregate(tx, batch: list[dict]) -> None:
     tx.run(_CYPHER_MERGE_SEGREGATE, batch=batch)
 
 
+def _tx_merge_no_segregation_required(tx, batch: list[dict]) -> None:
+    tx.run(_CYPHER_MERGE_NO_SEGREGATION_REQUIRED, batch=batch)
+
+
 def transfer_imdg_segregation_to_neo4j(pg_conn, neo4j_driver) -> None:
     chem_rows = fetch_chemical_imdg_classes(pg_conn)
     if not chem_rows:
@@ -242,15 +283,23 @@ def transfer_imdg_segregation_to_neo4j(pg_conn, neo4j_driver) -> None:
         for (a, b), code in IMDG_GENERAL_SEGREGATION_TABLE.items()
         if a in present_classes and b in present_classes
     ]
+    no_segregation_batch = [
+        {"class_a": a, "class_b": b}
+        for (a, b) in IMDG_NO_SEGREGATION_PAIRS
+        if a in present_classes and b in present_classes
+    ]
 
     with neo4j_driver.session(database=NEO4J_DATABASE) as session:
         session.execute_write(_tx_set_chemical_class, chem_rows)
         if segregate_batch:
             session.execute_write(_tx_merge_segregate, segregate_batch)
+        if no_segregation_batch:
+            session.execute_write(_tx_merge_no_segregation_required, no_segregation_batch)
 
     logger.info(
-        "IMDG 격리 그래프 이관 완료: Chemical %d개 (Class %d종), SEGREGATE 쌍 %d개",
-        len(chem_rows), len(present_classes), len(segregate_batch),
+        "IMDG 격리 그래프 이관 완료: Chemical %d개 (Class %d종), SEGREGATE 쌍 %d개, "
+        "NO_SEGREGATION_REQUIRED(공인 X) 쌍 %d개",
+        len(chem_rows), len(present_classes), len(segregate_batch), len(no_segregation_batch),
     )
 
 
