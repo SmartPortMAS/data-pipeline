@@ -186,16 +186,20 @@ def run_port_call() -> None:
 
 
 def run_portmis(start_date: str | None = None, end_date: str | None = None) -> None:
-    from data_pipeline.collectors.portmis_collector import collect_portmis, resolve_incremental_start_date
+    from data_pipeline.collectors.portmis_collector import (
+        collect_portmis,
+        resolve_incremental_start_date,
+        resolve_lookahead_end_date,
+    )
     from data_pipeline.loaders.portmis_pg_loader import load as load_portmis
     from data_pipeline.preprocessors.portmis_preprocessor import preprocess_portmis
 
-    today = datetime.datetime.now().strftime("%Y%m%d")
     # --start를 안 주면 "오늘부터"가 아니라 "마지막 수집 이후로 이어붙이기"가 기본이다
     # (2026-08-19) — 매일 이 명령을 그대로 재실행해도 그날그날 새로 입항한 건만
     # 자동으로 누적되도록 하기 위함(portmis_collector.py 모듈 docstring 참고).
+    # 종료일 기본값은 오늘이 아니라 오늘+3일 — 입항 예정 신고까지 받는다(2026-09-17).
     start_date = start_date or resolve_incremental_start_date()
-    end_date = end_date or today
+    end_date = end_date or resolve_lookahead_end_date()
 
     print(f"=== [portmis] 1/3 수집 ({start_date} ~ {end_date}) ===")
     collect_portmis(start_date=start_date, end_date=end_date)
