@@ -13,7 +13,7 @@ data/raw/portmis/ 에 저장합니다.
     python data_pipeline/collectors/portmis_collector.py [--start YYYYMMDD] [--end YYYYMMDD]
 
     --start : 조회 시작일. 생략하면 "자동 이어붙이기"(아래 설명) — 오늘이 아니다.
-    --end   : 조회 종료일. 기본값: 오늘
+    --end   : 조회 종료일. 기본값: 오늘 + LOOKAHEAD_DAYS(3) — 입항 예정 신고 포함 (2026-09-17)
 
     (2026-08-19) --start를 생략하면 마지막으로 수집해 둔 raw 파일의 종료일부터 자동으로
     이어서 수집한다 — 매번 날짜를 손으로 갱신하지 않아도 "그날그날 새로 입항한 것만"
@@ -91,6 +91,17 @@ RAW_PORTMIS_DIR = os.path.join(BASE_DIR, "data", "raw", "portmis")
 
 MAX_ROWS_PER_PAGE = 100  # API 최대 허용 건수 (페이징)
 
+# (2026-09-17) 입항 예정 창 — 매 수집마다 오늘부터 며칠 뒤까지 함께 조회한다.
+#
+# 예전엔 "마지막 수집일 ~ 오늘"만 조회해서, 아직 입항하지 않은 선박의 입항 신고
+# (사전배정 계류시설 포함)를 한 번도 받지 못했다. 그런데 API 는 미래 날짜 조회에
+# 입항 예정 신고를 돌려준다(실측 9/17: 오늘~+3일 115건, 입항 시각이 미래인 건 92건,
+# 그중 액체화물선 65척 전부 계류시설 기재). SafeBerth 의 "입항 전" 판정은 이
+# 데이터가 없으면 성립하지 않는다.
+#
+# 같은 항차가 최초 -> 변경 -> 최종 신고로 바뀌므로 창을 매번 다시 조회해 덮어쓴다.
+LOOKAHEAD_DAYS = 3
+
 _RAW_FILENAME_RE = re.compile(r"^portmis_vessel_(\d{8})_(\d{8})\.json$")
 
 # ---------------------------------------------------------------------------
@@ -153,14 +164,29 @@ def find_last_collected_end_date() -> str | None:
 def resolve_incremental_start_date() -> str:
     """--start 생략 시 쓸 시작일 — "자동 이어붙이기".
 
-    마지막 수집 종료일을 하루 겹쳐서(포함) 다시 시작한다 — 그날 수집 이후에 추가로
-    들어온 입항 신고를 놓치지 않기 위한 보수적 겹침이며, upsert라 중복 걱정이 없다
-    (모듈 docstring 참고). 수집 이력이 전혀 없으면(최초 실행) 오늘부터 시작한다.
+    (2026-09-17 변경) 파일명의 종료일은 이제 "실행일 + LOOKAHEAD_DAYS"라 미래일 수
+    있다. 그 값을 그대로 시작일로 쓰면 오늘을 건너뛴다. 그래서 종료일에서 입항 예정
+    창만큼 되돌린 날(= 마지막 실행일)에서 하루 더 겹쳐 시작하고, 어떤 경우에도
+    어제보다 늦게 시작하지 않는다 — 어제 들어온 최종 신고·출항 기록까지 다시 받는다.
+
+    창을 도입하기 전 파일(종료일 = 실행일)에 대해서는 필요보다 며칠 앞에서 시작하게
+    되지만, upsert 라 중복이 쌓이지 않으므로 안전하다. 이력이 없으면 어제부터.
     """
+    today = datetime.date.today()
+    yesterday = today - datetime.timedelta(days=1)
     last_end = find_last_collected_end_date()
     if last_end is None:
-        return datetime.datetime.now().strftime("%Y%m%d")
-    return last_end
+        return yesterday.strftime("%Y%m%d")
+    last_run_day = (
+        datetime.datetime.strptime(last_end, "%Y%m%d").date()
+        - datetime.timedelta(days=LOOKAHEAD_DAYS + 1)
+    )
+    return min(last_run_day, yesterday).strftime("%Y%m%d")
+
+
+def resolve_lookahead_end_date() -> str:
+    """--end 생략 시 쓸 종료일 — 오늘 + LOOKAHEAD_DAYS (입항 예정 신고 포함)."""
+    return (datetime.date.today() + datetime.timedelta(days=LOOKAHEAD_DAYS)).strftime("%Y%m%d")
 
 
 def fetch_vessel_entries(port_code: str, start_date: str, end_date: str) -> list:
@@ -260,19 +286,21 @@ def collect_portmis(start_date: str, end_date: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PORT-MIS 울산항 선박 입출항 수집기")
-    today_str = datetime.datetime.now().strftime("%Y%m%d")
     parser.add_argument(
         "--start", type=str, default=None,
-        help="조회 시작일 (YYYYMMDD). 생략하면 마지막 수집 종료일부터 자동 이어붙이기(최초 실행이면 오늘)",
+        help="조회 시작일 (YYYYMMDD). 생략하면 마지막 실행일 전날부터 자동 이어붙이기(최초 실행이면 어제)",
     )
-    parser.add_argument("--end", type=str, default=today_str, help="조회 종료일 (YYYYMMDD). 기본: 오늘")
+    parser.add_argument(
+        "--end", type=str, default=resolve_lookahead_end_date(),
+        help=f"조회 종료일 (YYYYMMDD). 기본: 오늘+{LOOKAHEAD_DAYS}일 (입항 예정 신고 포함)",
+    )
     args = parser.parse_args()
 
     start_date = args.start
     if start_date is None:
         start_date = resolve_incremental_start_date()
-        reason = "이전 수집 이력 없음 → 오늘부터" if find_last_collected_end_date() is None \
-            else f"마지막 수집 종료일({start_date})부터 겹쳐서 이어붙임"
+        reason = "이전 수집 이력 없음 → 어제부터" if find_last_collected_end_date() is None \
+            else f"마지막 실행일 전날({start_date})부터 겹쳐서 이어붙임"
         print(f"[자동 이어붙이기] --start 생략됨 — {reason}")
 
     collect_portmis(start_date=start_date, end_date=args.end)

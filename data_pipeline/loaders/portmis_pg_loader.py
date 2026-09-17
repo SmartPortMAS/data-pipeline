@@ -35,8 +35,47 @@ def _drop_invalid_port_code(df):
     return df[~bad].reset_index(drop=True)
 
 
+def _db_columns() -> set[str] | None:
+    """portmis_vessel 에 실제로 있는 컬럼. 조회 실패 시 None(필터 안 함)."""
+    from sqlalchemy import text
+
+    from data_pipeline.common_pg_loader import get_engine
+
+    try:
+        with get_engine().connect() as conn:
+            rows = conn.execute(text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'portmis_vessel'"
+            )).fetchall()
+        return {r[0] for r in rows} or None
+    except Exception:
+        return None
+
+
+def _make_row_filter():
+    """행 필터 + 아직 DB 에 없는 컬럼 제외.
+
+    이 표는 backend(Alembic)가 소유한다. 수집기가 새 필드(예: arrival_report_type,
+    alembic 0018)를 staging 에 먼저 싣고, 어떤 PC 에서는 아직 마이그레이션을 안 했을
+    수 있다 — 그 PC 에서 PORT-MIS 적재 전체가 "column does not exist"로 죽지 않도록
+    DB 에 없는 컬럼만 빼고 나머지는 적재한다(경고 출력).
+    """
+    cols = _db_columns()
+
+    def _filter(df):
+        df = _drop_invalid_port_code(df)
+        if cols:
+            missing = [c for c in df.columns if c not in cols]
+            if missing:
+                print(f"  [주의] DB 에 없는 컬럼 제외: {missing} - backend 에서 alembic upgrade head 필요")
+                df = df.drop(columns=missing)
+        return df
+
+    return _filter
+
+
 def load() -> None:
-    load_all(TABLE_MAP, auto_create=False, row_filter=_drop_invalid_port_code)
+    load_all(TABLE_MAP, auto_create=False, row_filter=_make_row_filter())
 
 
 if __name__ == "__main__":
