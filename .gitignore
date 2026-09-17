@@ -7,6 +7,7 @@
 data/raw/*
 data/staging/*
 data/mart/*
+data/state/*
 !**/.gitkeep
 
 __pycache__/
