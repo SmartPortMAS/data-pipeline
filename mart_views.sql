@@ -1333,6 +1333,19 @@ berth AS (
         ('UTK 신항부두',                 14.0)
     ) AS t(wharf_name, chart_depth_m)
 ),
+berth_range AS (
+    -- 선석별 수심이 다른 부두의 "가장 깊은 선석" 수심 (2026-09-18, 울산지방해양수산청
+    -- 울산항시설현황 실조회 — SK5부두 5선석 '7-11m', SK2부두 1선석 7.5m + 4선석 8m).
+    -- VTS 입항 기록엔 선석 번호가 없어(실측: 'SK5부두'로만 옴) 어느 선석인지 모른다.
+    -- 위 목록의 최소 수심으로는 안 되지만 가장 깊은 선석이면 여유가 있는 배는
+    -- '접안 불가'가 아니라 '확인 요청'(CHECK)이다 — 실제로 SK5부두에 12시간째 붙어
+    -- 있는 흘수 7.9m 배가 '접안 불가' 경보로 떴다. 항만은 수심이 맞는 선석에
+    -- 배정하므로, 이 경우 시스템이 할 말은 "어느 선석인지 확인"이지 "불가"가 아니다.
+    SELECT * FROM (VALUES
+        ('SK5부두', 11.0),
+        ('SK2부두',  8.0)
+    ) AS t(wharf_name, depth_max_m)
+),
 vessel AS (
     SELECT DISTINCT ON (upper(btrim(callsgn)))
            upper(btrim(callsgn)) AS callsgn, draught, received_at_utc
@@ -1362,6 +1375,13 @@ SELECT
     round((v.draught * 0.10)::numeric, 2)               AS ukc_required_m,
     CASE
         WHEN v.draught IS NULL OR b.chart_depth_m IS NULL THEN 'UNKNOWN'
+        -- 가장 얕은 선석 기준으론 부족하지만 가장 깊은 선석이면 UKC 10% 가 나온다
+        -- → 선석 확인 요청 (berth_range 설명)
+        WHEN br.depth_max_m IS NOT NULL
+             AND (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                  - v.draught) < v.draught * 0.10
+             AND (br.depth_max_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                  - v.draught) >= v.draught * 0.10       THEN 'CHECK'
         WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0)
              <= v.draught                                THEN 'NOT_ALLOWED'
         WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
@@ -1370,7 +1390,9 @@ SELECT
     END                                                 AS draught_verdict,
     (SELECT observed_at_utc FROM tide)                  AS tide_observed_at_utc,
     v.received_at_utc                                   AS draught_observed_at_utc,
-    pc.arrival_at_utc
+    pc.arrival_at_utc,
+    -- 선석별 수심이 다른 부두의 가장 깊은 선석 수심 (없으면 chart_depth_m 과 같음)
+    COALESCE(br.depth_max_m, b.chart_depth_m)           AS chart_depth_max_m
 FROM pc
 -- ★ 선석 이름은 반드시 마스터 표기로 붙인다.
 --   예전 pc.facility_name 은 VTS 원문('S-OIL1부두'·'SK1부두 11'·'OTK부두')이었고 위
@@ -1392,6 +1414,7 @@ FROM pc
 LEFT JOIN mart.facility_alias fa
        ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
 LEFT JOIN berth  b ON b.wharf_name = fa.wharf_name
+LEFT JOIN berth_range br ON br.wharf_name = fa.wharf_name
 LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
