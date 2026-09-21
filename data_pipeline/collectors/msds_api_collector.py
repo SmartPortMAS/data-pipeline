@@ -8,8 +8,10 @@ API: https://apis.data.go.kr/B552468/msdschem/
   2. /getChemDetail01 ~ /getChemDetail16 → chemId별 16개 섹션 수집
 """
 
+import csv
 import json
 import os
+import re
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -23,61 +25,62 @@ API_KEY_DECODED = os.getenv("KOSHA_MSDS_API_KEY", "")
 BASE_URL = "https://apis.data.go.kr/B552468/msdschem"
 RAW_DIR = "data/raw/msds"
 
-# 울산항 주요 수출입 액체화물 — (한국명, CAS번호)
-# CAS번호로 정확히 1건 조회하므로 부분일치 오류 없음
-# 출처: 울산항 물동량 통계 및 MSDS 공개 자료 (2026년 기준)
-ULSAN_CARGO_CHEMICALS = [
-    # ── 1. 원유 및 정유·석유제품 (Crude & Refined Oil) ──────────────────────
-    # 울산항 전체 물동량의 최대 비중을 차지하는 항목군
-    ("원유",             "8002-05-9"),    # Crude Oil
-    ("경유",             "68334-30-5"),   # Diesel Fuel — 수출입량 상위 1위 품목
-    ("휘발유",           "8006-61-9"),    # Light Gasoline
-    ("등유",             "8008-20-6"),    # Kerosine
-    ("나프타",           "8030-30-6"),    # Naphtha (직류 나프타)
-    ("벙커유/잔사유",    "68476-33-5"),   # Fuel Oil, Residual (Bunker)
-    ("아스팔트",         "8052-42-4"),    # Asphalt
+# ---------------------------------------------------------------------------
+# 수집 대상 화학물질 — data/reference/ 의 CSV 두 개에서 읽는다.
+#
+# [2026-09-13] 하드코딩 34종 목록을 제거했다. 울산항만공사 MSDS 정리본(169행)을
+# 확보하면서 목록이 151종으로 늘었고, 코드에 박아두면 목록 변경이 코드 변경이 된다.
+#
+#   ulsan_msds_curated.csv   울산항만공사 원본 169행 (CAS 정정 2건 반영)
+#                            169행 != 169종 — 같은 CAS를 공유하는 28행이 있어
+#                            고유 CAS 는 141종이다(같은 물질의 다른 상품명).
+#                            MSDS 는 CAS 단위로 발급되므로 CAS 로 중복을 제거한다.
+#                            (제거 안 하면 같은 MSDS 가 여러 건 들어가고,
+#                             UN번호로 조인하는 화물 판정이 그만큼 부풀려진다)
+#   petroleum_products.csv   원본 목록에 없는 석유제품·가스 10종.
+#                            원본이 케미컬 탱커 취급 물질 위주라 원유·경유·나프타
+#                            등이 빠져 있는데, S-Oil/SK/현대오일터미널 선석의
+#                            주력 화물이라 우리 관제 범위에서는 필수다.
+#
+# CAS 정정 이력(원본은 cas_no_original 컬럼에 보존):
+#   #95  헥실렌            124-09-4 -> 592-41-6  (124-09-4는 헥사메틸렌디아민 #93)
+#   #158 삼차-부틸알콜      76-65-0  -> 75-65-0   (76-65-0은 존재하지 않는 번호)
+# ---------------------------------------------------------------------------
+# 경로는 이 모듈 위치에서 계산한다 — cwd 에 의존하면 어디서 실행하느냐에 따라
+# 조용히 다른 파일을 읽거나(최악) FileNotFoundError 가 난다.
+_PKG_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REFERENCE_DIR = os.path.join(_PKG_ROOT, "data", "reference")
+CURATED_CSV = os.path.join(REFERENCE_DIR, "ulsan_msds_curated.csv")
+PETROLEUM_CSV = os.path.join(REFERENCE_DIR, "petroleum_products.csv")
 
-    # ── 2. BTX 및 기초 석유화학 유분 (Basic Petrochemicals) ─────────────────
-    # 울산 석유화학단지 핵심 원료 — 액체화물 비중 약 12~13%
-    ("벤젠",             "71-43-2"),      # Benzene
-    ("톨루엔",           "108-88-3"),     # Toluene
-    ("자일렌/크실렌",    "1330-20-7"),    # Xylene (혼합 이성질체)
-    ("파라자일렌",       "106-42-3"),     # p-Xylene — 국내 제조·수출 핵심 품목
-    ("에틸렌",           "74-85-1"),      # Ethylene
-    ("프로필렌",         "115-07-1"),     # Propylene
-    ("스티렌",           "100-42-5"),     # Styrene
-    ("부타디엔",         "106-99-0"),     # Butadiene
+_CAS_RE = re.compile(r"^\d{2,7}-\d{2}-\d$")
 
-    # ── 3. 알코올 및 글리콜류 (Alcohols & Glycols) ──────────────────────────
-    # 상업용 탱크터미널에서 대량 저장·취급
-    ("메탄올",           "67-56-1"),      # Methanol
-    ("에탄올",           "64-17-5"),      # Ethanol
-    ("에틸렌글리콜",     "107-21-1"),     # Ethylene Glycol (EG) — 석유화학 핵심 물질
-    ("이소프로판올",     "67-63-0"),      # Isopropanol (IPA)
 
-    # ── 4. 액체 가스 화물 (Liquefied Gases) ─────────────────────────────────
-    # 전용 가스 부두 및 에너지 터미널 취급
-    ("LPG(프로판)",      "74-98-6"),      # Propane
-    ("LPG(부탄)",        "106-97-8"),     # Butane
-    ("LNG/메탄",         "74-82-8"),      # Methane / LNG
-    ("액화수소",         "1333-74-0"),    # Liquid Hydrogen
+def load_target_chemicals() -> list[tuple[str, str]]:
+    """(표시명, CAS) 목록. CAS 기준 중복 제거, 원본 등장 순서 유지.
 
-    # ── 5. 석유화학 중간체 및 화공품 (Intermediates & Specialty Chemicals) ───
-    # 울산항 MSDS 직접 확인 물질 포함
-    ("아크릴로니트릴",          "107-13-1"),   # Acrylonitrile (AN)
-    ("프로필렌옥사이드",        "75-56-9"),    # Propylene Oxide (PO)
-    ("염화비닐",                "75-01-4"),    # Vinyl Chloride (VCM)
-    ("톨루엔디이소시아네이트",  "26471-62-5"), # Toluene Diisocyanate (TDI)
-    ("테트라하이드로푸란",      "109-99-9"),   # Tetrahydrofuran (THF)
-    ("트리에테르 폴리올 수지",  "9082-00-2"),  # Triol Polyether Polyol
-    ("도데센",                  "97280-83-6"), # Dodecene (Tri-n-butene)
-    ("트리에탄올아민",          "102-71-6"),   # Triethanolamine (TEA)
-    ("트리클로로에틸렌",        "79-01-6"),    # Trichloroethylene (TCE)
+    한 행에 CAS 가 여러 개인 경우(#74 에탄/프로판)는 구분자로 쪼개 각각 담는다.
+    형식에 맞지 않는 값(#125 "71-41-0 외")은 유효한 토큰만 취한다.
+    """
+    seen: dict[str, str] = {}
 
-    # ── 6. 무기화학물질 및 기타 (Inorganics & Others) ───────────────────────
-    ("황산",             "7664-93-9"),    # Sulfuric Acid
-    ("암모니아",         "7664-41-7"),    # Ammonia
-]
+    def add(name: str, raw: str) -> None:
+        for token in re.split(r"[,/]", raw or ""):
+            token = token.strip()
+            if _CAS_RE.match(token):
+                seen.setdefault(token, name)
+
+    with open(CURATED_CSV, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            label = f"{row['name_ko']}({row['name_en']})"
+            add(label, row["cas_no"])
+
+    with open(PETROLEUM_CSV, encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            add(row["name_ko"], row["cas_no"])
+
+    return [(name, cas) for cas, name in seen.items()]
+
 
 # 16개 섹션 엔드포인트
 DETAIL_ENDPOINTS = [
@@ -157,10 +160,11 @@ def collect_all_msds_raw() -> None:
     all_results = []
     errors = []
 
-    total = len(ULSAN_CARGO_CHEMICALS)
+    targets = load_target_chemicals()
+    total = len(targets)
     print(f"[MSDS 수집 시작] {total}개 화학물질 (CAS번호 기준 1건씩)")
 
-    for i, (name, cas_no) in enumerate(ULSAN_CARGO_CHEMICALS, 1):
+    for i, (name, cas_no) in enumerate(targets, 1):
         print(f"  [{i}/{total}] {name} (CAS {cas_no})")
 
         try:
