@@ -585,15 +585,16 @@ def build_v2(pool):
     """
     liquids = [v for v in pool if v[3]]
     others = [v for v in pool if not v[3]]
-    ordered = liquids + others
-    if not ordered:
-        ordered = [(f"TEST{i:03d}", f"샘플선박{i}", "", i % 3 == 0, True) for i in range(50)]
+    if not liquids and not others:
+        liquids = [(f"TEST{i:03d}", f"샘플선박{i}", "", True, True) for i in range(50)]
 
-    rows, i, seq = [], 0, 1
+    rows, seq = [], 1
     facility_usage: dict[str, int] = {}
-    while len(rows) < TARGET_ROWS:
-        cs, vname, cat, liq, est = ordered[i % len(ordered)]
-        i += 1
+    # ① 액체화물선 전원 — 1~3건씩.
+    #    (8/15 개정 때 TARGET_ROWS 상수만 지우고 그걸 쓰는 루프가 남아 NameError 로
+    #     죽어 있었다 — 2026-09-18 재생성하다 발견. 8/15 이후 이 스크립트는 한 번도
+    #     돌지 않았고 DB 의 합성 화물은 8/15 선박 목록(411척) 그대로였다.)
+    for cs, vname, cat, liq, est in liquids:
         for _ in range(random.randint(1, 3)):
             cargo, un, _imdg, _pg, basis = pick_cargo(cat, liq, est)
             base_candidates = LIQUID_FACILITIES if un else DRY_FACILITIES

@@ -54,6 +54,8 @@
 --        위치 --vessel_uid--> 자기 자신 집계,  PORT-MIS --callsgn--> 선종
 --   2. mart.vessel_latest_position 선박별 최신 위치 1행 (UPA 우선, AIS 보강)
 --        UPA∪AIS --vessel_uid--> 최신 1행,  upa_port_call --callsgn--> 출항확정
+--   2-1. mart.vessel_presence      지금 선석·정박지에 실제로 있는 배 (UPA 위치 판정)
+--        위치 --좌표--> 선석·정박지 구역,  upa_port_call --callsgn--> 신고 선석 이름표
 --   3. mart.port_call_overview     입항 통합 (입항건당 대표 1행)
 --        PORT-MIS ∙ UPA운항 ∙ 화물 전부 --callsgn-->
 --   4. mart.cargo_msds             화물 ↔ MSDS (★안전관제 핵심)
@@ -61,12 +63,12 @@
 --   5. mart.weather_now            환경 최신 1행 (기상+조위+파고+조류 스냅샷)
 --        --observed_at_utc--> 각 관측 최신값
 --   5-1. mart.berth_draught_check  조위 반영 가용수심 · UKC 판정
---        입항 --facility_name--> 선석 수심,  입항 --callsgn--> 흘수
+--        선석 재선(2-1) --berth_name--> 선석 수심,  --callsgn--> 흘수
 --   6. mart.dashboard_current      '한 줄 조회' — 대시보드·에이전트 진입점
 --        위치 --vessel_uid--> 식별 / 위치 --callsgn--> 입항·화물 / 기상 CROSS
 --   7. mart.pipeline_health        수집기 생존 신호 (조인 없음, 단일 집계행)
 --   8. mart.berth_current_cargo    선석별 현재 취급 화물 → chem_id (백엔드 소비 계약)
---        재항선박 --callsgn--> 화물 --dg_un_no--> MSDS --> chem_id
+--        선석 재선(2-1) --callsgn--> 화물 --dg_un_no--> MSDS --> chem_id
 --        ★ backend/app/agents/scheduling/category_map.py 의 카테고리 대표값
 --          근사를 대체한다 (그 파일 주석이 이 뷰를 기다리고 있다)
 --   (+ mart.msds_flat             msds_chemical JSONB 평탄화 — cargo_msds 가 사용)
@@ -100,14 +102,22 @@ CREATE SCHEMA IF NOT EXISTS mart;
 --   있으면 에러로 드러나게 둔다 — 조용한 파괴보다 시끄러운 실패가 낫다.
 --
 -- ★ 삭제 순서 = 생성 역순 (의존하는 쪽을 먼저 지운다)
+--
+--   2026-09-17 수정 — facility_alias 에 기대는 berth_dwell_stats·berth_draught_check
+--   가 facility_alias 보다 뒤에 지워지고 있었다. 기존 DB 에서 DROP MATERIALIZED
+--   VIEW 가 "other objects depend on it" 으로 실패하고, psql 기본값(ON_ERROR_STOP
+--   off)이 그 에러를 넘겨 facility_alias 가 옛 정의로 계속 남아 있었다.
+--   의존하는 뷰를 모두 앞으로 옮겼다 — psql -v ON_ERROR_STOP=1 로 끝까지 통과한다.
 -- ---------------------------------------------------------------------------
+DROP VIEW IF EXISTS mart.berth_dwell_stats;
 DROP VIEW IF EXISTS mart.berth_current_cargo;
+DROP VIEW IF EXISTS mart.berth_draught_check;
+DROP VIEW IF EXISTS mart.vessel_presence;
 DROP MATERIALIZED VIEW IF EXISTS mart.facility_alias;
 DROP FUNCTION IF EXISTS mart.norm_berth(text);
 DROP FUNCTION IF EXISTS mart.norm_facility(text);
 DROP VIEW IF EXISTS mart.pipeline_health;
 DROP VIEW IF EXISTS mart.dashboard_current;
-DROP VIEW IF EXISTS mart.berth_draught_check;
 DROP VIEW IF EXISTS mart.weather_now;
 DROP VIEW IF EXISTS mart.cargo_msds;
 DROP VIEW IF EXISTS mart.msds_flat;
@@ -327,6 +337,8 @@ other_facility AS (
 ),
 source_names AS (
     -- upa_port_call(VTS 원문) + upa_cargo_manifest(합성 화물의 자체 표기) 합집합.
+    -- (아래 사고 설명은 2026-09-17 전 정의 기준. 지금 berth_current_cargo.facility_name
+    --  은 위치 판정 선석의 마스터 표기라 맨 아래 마스터 자신 항목으로 붙는다.)
     -- 둘이 서로 다른 어휘를 쓴다 — berth_current_cargo.facility_name은
     -- COALESCE(cm.facility_name, ip.facility_name)라(뷰 8번 정의) 화물이 매칭된
     -- 행은 합성 manifest 표기('S-Oil 1부두', 이미 정돈된 형태)로 나오고 화물이
@@ -340,6 +352,14 @@ source_names AS (
     SELECT DISTINCT facility_name
     FROM upa_cargo_manifest
     WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+    UNION
+    -- 마스터 표기 자신. mart.vessel_presence(2-1)는 좌표로 찾은 선석을 마스터
+    -- 표기로 내보내는데, 'UTK 신항부두'·'신항컨부두' 같은 27종은 VTS·manifest
+    -- 어느 쪽에도 그 표기로 나온 적이 없어(2026-09-17 실측) 이 사전을 거치는
+    -- 소비자(scheduling/service.py)가 그 선석의 화물을 못 찾았다.
+    SELECT DISTINCT wharf_name
+    FROM upa_berth_facility
+    WHERE wharf_name IS NOT NULL AND btrim(wharf_name) <> ''
 ),
 matched AS (
     SELECT
@@ -530,9 +550,8 @@ LEFT JOIN pm_latest m ON m.callsgn = b.callsgn;
 
 -- ---------------------------------------------------------------------------
 -- 2. mart.vessel_latest_position — 선박별 최신 위치 1행
---    UPA 항내 선박위치(기본 소스)를 우선하되, 레거시 AIS 관측이 더 최신이면
---    그것을 쓴다 (mmsi → vessel_identity 로 callsgn 역매핑). position_source
---    컬럼으로 어느 소스의 관측인지 표시한다.
+--    UPA 항내 선박위치 단일 소스 (2026-09-17 레거시 AIS 합치기 제거 — 아래 unified
+--    주석). position_source 컬럼은 소비자 호환을 위해 'UPA' 로 남겨 둔다.
 --
 --    [MMSI-First] 예전에는 callsgn 없는 UPA 관측을 통째로 버려서 관공선·
 --    소방정·순찰선 등이 지도에서 사라졌다. 이제 MMSI 를 1차 키로 쓰고
@@ -542,15 +561,20 @@ LEFT JOIN pm_latest m ON m.callsgn = b.callsgn;
 --      않는다. 소비 측은 now() - received_at_utc 로 신선도를 판단할 것.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.vessel_latest_position AS
-WITH unified AS (
+-- MATERIALIZED: AIS 합치기(UNION ALL)를 뺀 뒤 플래너가 이 CTE 를 바깥
+-- dashboard_current 조인 안으로 풀어 넣으면서 /vessels 조회가 1.5초 → 4초로
+-- 느려졌다(2026-09-17 실측). 한 번 계산해 두게 하면 1.1초다.
+WITH unified AS MATERIALIZED (
     SELECT COALESCE(mmsi::text, 'CS:' || upper(btrim(callsgn))) AS vessel_uid,
            nullif(upper(btrim(callsgn)), '')  AS callsgn,
            mmsi,
            latitude,
            longitude,
-           sog,
-           cog,
-           heading,
+           -- AIS 합치기가 있을 때 타입이 double precision 으로 올라가 있었다.
+           -- 소비자 계약(JSON 실수)을 그대로 두려고 명시적으로 맞춘다.
+           sog::double precision      AS sog,
+           cog::double precision      AS cog,
+           heading::double precision  AS heading,
            draught,
            nav_status_code::text      AS nav_status_code,
            received_at_utc,
@@ -559,33 +583,13 @@ WITH unified AS (
     FROM upa_vessel_position
     WHERE mmsi IS NOT NULL
        OR nullif(btrim(callsgn), '') IS NOT NULL
-
-    UNION ALL
-
-    SELECT a.mmsi::text,
-           vi.callsgn,
-           a.mmsi,
-           a.latitude,
-           a.longitude,
-           a.sog,
-           a.cog,
-           -- AIS(레거시 웹소켓) 응답에는 heading/draught 가 없다(ais_vessel_position
-           -- 테이블 자체에 컬럼 없음, Alembic 0002 참조). UPA 소스가 기본이라
-           -- 실사용에 지장 없지만, 값 없음과 0 을 혼동하지 않도록 명시적으로 NULL.
-           NULL::double precision     AS heading,
-           NULL::double precision     AS draught,
-           a.nav_status_code::text,
-           a.received_at_utc,
-           a.quality_flag,
-           'AIS'
-    FROM ais_vessel_position a
-    LEFT JOIN (
-        SELECT DISTINCT ON (mmsi) mmsi, callsgn
-        FROM mart.vessel_identity
-        WHERE mmsi IS NOT NULL
-        ORDER BY mmsi
-    ) vi ON vi.mmsi = a.mmsi
-    WHERE a.mmsi IS NOT NULL
+    -- ★ 2026-09-17 — 레거시 AIS(ais_vessel_position) 합치기를 뺐다.
+    --   aisstream 수신은 멈췄고(1,112행, LEGACY_DOMAINS) 그 행은 received_at_utc 가
+    --   전부 NULL 이었다. 아래 DISTINCT ON ... ORDER BY received_at_utc DESC 에서
+    --   NULL 이 맨 앞에 오므로(DESC 기본값 NULLS FIRST) 411척이 지금 UPA 위치 대신
+    --   옛 AIS 좌표(부산 앞바다 등)·"신호 없음"으로 보였다 — 온산 선석에 접안해
+    --   있는 배 6척이 지도·KPI 에서 빠진 것도 이 때문이었다.
+    --   선박 위치의 정본은 UPA 선박위치 하나다(메모: vessel-state-truth).
 ),
 -- 서류상 재항 여부 — 출항은 "추정"하지 않고 upa_port_call 로 "확정"한다.
 -- departure_at_utc 가 NULL 인 최신 입항 건이 있으면 아직 항내에 있다는 신고 상태.
@@ -620,7 +624,7 @@ latest AS (
            u.position_source
     FROM unified u
     LEFT JOIN mart.vessel_identity vi2 ON vi2.vessel_uid = u.vessel_uid
-    ORDER BY u.vessel_uid, u.received_at_utc DESC
+    ORDER BY u.vessel_uid, u.received_at_utc DESC NULLS LAST
 )
 SELECT l.*,
        -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
@@ -675,6 +679,220 @@ SELECT l.*,
 FROM latest l
 LEFT JOIN still_in_port s ON s.callsgn = l.callsgn
 LEFT JOIN departed_doc  d ON d.callsgn = l.callsgn;
+
+-- ---------------------------------------------------------------------------
+-- 2-1. mart.vessel_presence — 지금 선석·정박지에 "실제로 있는" 배 (선박당 1행)
+--
+-- ★ 왜 위치로 판정하나 — upa_port_call 은 "신고 이벤트"다 (2026-09-17 실측)
+--   (a) 유령: 출항 처리가 빠진 건이 남는다. "입항했고 출항 기록 없음"으로 세면
+--       선석 58곳에 818척이 점유 중이었고, 그중 775척은 입항한 지 7일이 넘었다.
+--   (b) 구간이 넓다: 입항~출항에는 정박지 대기·이선이 다 들어 있다. 최근 40일
+--       완료 입항 건의 체류 중 정지 위치 4,373개 중 47%가 신고 선석에서 2km
+--       밖이었다(대부분 정박(앵커링)). 이 구간으로 세면 정박지에 있는 배가
+--       선석을 점유한 것으로 나온다.
+--   (c) 입항 건 하나가 이벤트 여러 행(입항·접안·이선·이안·투묘·양묘·출항)이고
+--       행마다 시설이 다르다. DISTINCT ON (port_call_id) ORDER BY arrival_at_utc
+--       는 arrival 이 모든 행에서 같아서 아무 이벤트의 시설이나 집는다.
+--   → "지금 어디 있나"는 UPA 선박위치로 판정하고, port_call 은 "어느 선석으로
+--     신고했나"라는 이름표(배마다 최신 이벤트 1행)로만 쓴다.
+--     port_call 의 이력·통계 용도(berth_dwell_stats, 백테스트)는 그대로 둔다.
+--
+-- ★ 판정 규칙
+--   대상      선박별 최신 UPA 위치 1행. 최신 수집 시각에서 3시간 이내만(EC2 수집
+--             1시간 주기). now() 가 아니라 최신 수집 시각 기준이라 수집이 멈춰도
+--             화면이 "빈 항만"이 되지 않고 마지막 스냅샷을 보여준다 — 그 시각은
+--             snapshot_at_utc 로 함께 내보내고, 수집 정지 경고는 pipeline_health 몫.
+--   BERTH     정지(sog ≤ 0.5kn) · 정박(앵커링) 아님 · VTS 입항 기록이 있는 배이고
+--             ① 최신 VTS 이벤트(입항·접안·이선)의 선석이 1km 안 → 그 선석 ('신고+위치')
+--             ② 아니면 가장 가까운 선석이 300m 안             → 그 선석 ('위치')
+--             ③ 신고 선석에 좌표가 없고(부이 등) 정박지 구역 밖  → 신고 선석 ('신고')
+--   ANCHORAGE BERTH 가 아니고, 정지 또는 정박(앵커링)이며 정박지 구역(upa_anchorage) 안
+--   STOPPED   그 밖의 정지·묘박 — 조선소 의장안벽·물양장·예인선 대기 등
+--   UNDERWAY  그 밖
+--
+-- ★ 임계값 근거 (최근 40일 완료 입항 건의 체류 중 정지 위치 실측, 2026-09-17)
+--   - 신고 선석 좌표까지 1km 안 2,143개 중 95%가 600m 안. 선석 좌표가 선석당 한
+--     점이고 SK5부두(798m)·6부두(990m)처럼 긴 안벽이 있어 1km 로 둔다.
+--   - 가장 가까운 선석이 신고 선석과 같은 비율은 300m 안에서도 64%뿐이다. 이웃
+--     선석 간격이 200~400m 라 좌표만으로는 옆 선석과 헷갈린다 → 신고 선석을 먼저
+--     보고, 가장 가까운 선석은 신고가 없거나 1km 밖일 때만 쓴다(berth_basis 로 구분).
+--     용잠1·2부두는 원천 좌표가 똑같아 ②로는 구분되지 않는다(이름순 첫 번째).
+--   - "VTS 입항 기록이 있는 배" 조건: 예인선·급유선·관공선 수십 척이 부두 근처에
+--     모여 정지해 있어, 이 조건이 없으면 상선 선석 점유가 부풀었다.
+--   - 좌표가 없는 선석 9곳(부이 4기·북신항 등)은 거리로 확인할 수 없어 ③처럼 신고에
+--     기댄다. 그래도 "지금 위치가 새로 들어오고 정지해 있다"는 조건은 같이 걸려
+--     유령 기록은 걸러진다. 신고도 없는 배가 그곳에 있으면 모른다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION mart.dist_m(double precision, double precision,
+                                       double precision, double precision)
+RETURNS double precision AS $$
+    -- 하버사인 거리(m). 인자 순서: 위도1, 경도1, 위도2, 경도2
+    SELECT 6371000 * 2 * asin(sqrt(
+        power(sin(radians($3 - $1) / 2), 2)
+        + cos(radians($1)) * cos(radians($3)) * power(sin(radians($4 - $2) / 2), 2)));
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE VIEW mart.vessel_presence AS
+WITH snap AS (
+    SELECT max(received_at_utc) AS at FROM upa_vessel_position
+),
+pos AS (
+    SELECT DISTINCT ON (v.vessel_uid)
+           v.vessel_uid,
+           nullif(upper(btrim(v.callsgn)), '') AS callsgn_obs,
+           v.mmsi, v.vessel_name, v.latitude, v.longitude, v.sog,
+           v.nav_status_code, v.draught, v.received_at_utc
+    FROM upa_vessel_position v
+    CROSS JOIN snap
+    WHERE v.received_at_utc > snap.at - interval '3 hours'
+      AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
+    ORDER BY v.vessel_uid, v.received_at_utc DESC
+),
+cs AS (
+    -- 최신 관측에 호출부호가 빠진 배(정적신호 간헐 결측)는 같은 배의 마지막 값으로 보강.
+    -- 지금 보이는 배로만 좁혀 훑는다(전체 정렬은 조회마다 0.1초 이상).
+    SELECT DISTINCT ON (vessel_uid) vessel_uid, upper(btrim(callsgn)) AS callsgn
+    FROM upa_vessel_position
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+      AND vessel_uid IN (SELECT vessel_uid FROM pos)
+    ORDER BY vessel_uid, received_at_utc DESC
+),
+ident AS (
+    SELECT p.*, COALESCE(p.callsgn_obs, cs.callsgn) AS callsgn
+    FROM pos p
+    LEFT JOIN cs ON cs.vessel_uid = p.vessel_uid
+),
+berth AS (
+    SELECT DISTINCT ON (wharf_name) wharf_name, latitude, longitude
+    FROM upa_berth_facility
+    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    ORDER BY wharf_name, collected_at_utc DESC NULLS LAST
+),
+anch_pt AS (
+    -- POLYGON 은 경계 정점 여러 개, CIRCLE·BUNKER_RING 은 중심 1점 + 공시 반경.
+    -- TEXT 는 해도 글자 위치라 뺀다.
+    SELECT anchorage_name, latitude, longitude, radius_m
+    FROM upa_anchorage
+    WHERE anchorage_type IN ('POLYGON', 'CIRCLE', 'BUNKER_RING')
+      AND latitude IS NOT NULL AND longitude IS NOT NULL
+),
+anch_center AS (
+    SELECT anchorage_name, avg(latitude) AS lat, avg(longitude) AS lon
+    FROM anch_pt
+    GROUP BY anchorage_name
+),
+anch AS (
+    -- PostGIS 가 없어 다각형 내부 판정 대신 "중심 → 가장 먼 정점" 원으로 근사하고,
+    -- 원형은 공시 반경을 쓴다. 둘 다 +200m(묘박 선회 여유).
+    SELECT c.anchorage_name, c.lat, c.lon,
+           CASE WHEN max(p.radius_m) > 0 THEN max(p.radius_m)
+                ELSE max(mart.dist_m(c.lat, c.lon, p.latitude, p.longitude))
+           END + 200 AS radius_m
+    FROM anch_center c
+    JOIN anch_pt p USING (anchorage_name)
+    GROUP BY c.anchorage_name, c.lat, c.lon
+),
+vts_last AS (
+    -- 배마다 최신 VTS 이벤트 1행 — 신고 선석 이름표와 입항 시각
+    SELECT DISTINCT ON (upper(btrim(p.callsgn)))
+           upper(btrim(p.callsgn)) AS callsgn,
+           p.io_vts_name, p.facility_name, p.job_at_utc, p.arrival_at_utc,
+           fa.facility_type, fa.wharf_name
+    FROM upa_port_call p
+    LEFT JOIN mart.facility_alias fa ON fa.source_name = p.facility_name
+    WHERE upper(btrim(p.callsgn)) IN (SELECT callsgn FROM ident WHERE callsgn IS NOT NULL)
+    ORDER BY upper(btrim(p.callsgn)), p.job_at_utc DESC NULLS LAST, p.comm_count DESC NULLS LAST
+),
+located AS (
+    SELECT i.vessel_uid, i.callsgn, i.mmsi, i.vessel_name, i.latitude, i.longitude, i.sog,
+           i.nav_status_code, i.draught, i.received_at_utc,
+           vl.io_vts_name, vl.facility_name, vl.facility_type, vl.job_at_utc, vl.arrival_at_utc,
+           CASE WHEN vl.io_vts_name IN ('입항', '접안', '이선') AND vl.facility_type = 'BERTH'
+                THEN vl.wharf_name END                      AS declared_berth,
+           (vl.callsgn IS NOT NULL)                         AS has_vts_record,
+           COALESCE(i.sog <= 0.5, false)                    AS is_stopped
+    FROM ident i
+    LEFT JOIN vts_last vl ON vl.callsgn = i.callsgn
+),
+measured AS (
+    SELECT l.*,
+           mart.dist_m(l.latitude, l.longitude, db.latitude, db.longitude) AS declared_dist_m,
+           (l.declared_berth IS NOT NULL AND db.wharf_name IS NULL) AS declared_no_coord,
+           nb.wharf_name     AS nearest_berth,
+           nb.dist_m         AS nearest_dist_m,
+           na.anchorage_name AS nearest_anchorage,
+           na.dist_m         AS anchorage_dist_m,
+           na.radius_m       AS anchorage_radius_m
+    FROM located l
+    LEFT JOIN berth db ON db.wharf_name = l.declared_berth
+    LEFT JOIN LATERAL (
+        SELECT b.wharf_name, mart.dist_m(l.latitude, l.longitude, b.latitude, b.longitude) AS dist_m
+        FROM berth b
+        ORDER BY mart.dist_m(l.latitude, l.longitude, b.latitude, b.longitude), b.wharf_name
+        LIMIT 1
+    ) nb ON true
+    LEFT JOIN LATERAL (
+        -- 구역 반경 대비 가장 "안쪽"인 정박지
+        SELECT a.anchorage_name, a.radius_m, mart.dist_m(l.latitude, l.longitude, a.lat, a.lon) AS dist_m
+        FROM anch a
+        ORDER BY mart.dist_m(l.latitude, l.longitude, a.lat, a.lon) / a.radius_m
+        LIMIT 1
+    ) na ON true
+),
+judged AS (
+    SELECT m.*,
+           CASE
+               WHEN NOT (m.is_stopped AND m.has_vts_record)
+                    OR m.nav_status_code = '정박(앵커링)'   THEN NULL
+               WHEN m.declared_dist_m <= 1000               THEN '신고+위치'
+               WHEN m.nearest_dist_m <= 300                 THEN '위치'
+               WHEN m.declared_no_coord
+                    AND NOT COALESCE(m.anchorage_dist_m <= m.anchorage_radius_m, false)
+                                                            THEN '신고'
+           END AS berth_basis
+    FROM measured m
+)
+SELECT
+    j.vessel_uid,
+    j.callsgn,
+    j.mmsi,
+    j.vessel_name,
+    CASE
+        WHEN j.berth_basis IS NOT NULL                                  THEN 'BERTH'
+        WHEN (j.is_stopped OR j.nav_status_code = '정박(앵커링)')
+             AND j.anchorage_dist_m <= j.anchorage_radius_m             THEN 'ANCHORAGE'
+        WHEN j.is_stopped OR j.nav_status_code = '정박(앵커링)'          THEN 'STOPPED'
+        ELSE 'UNDERWAY'
+    END                                                   AS presence_zone,
+    CASE j.berth_basis
+        WHEN '위치' THEN j.nearest_berth
+        ELSE j.declared_berth
+    END                                                   AS berth_name,
+    j.berth_basis,
+    round(CASE j.berth_basis
+              WHEN '신고+위치' THEN j.declared_dist_m
+              WHEN '위치'      THEN j.nearest_dist_m
+          END)::int                                       AS berth_dist_m,
+    CASE WHEN j.berth_basis IS NULL
+              AND (j.is_stopped OR j.nav_status_code = '정박(앵커링)')
+              AND j.anchorage_dist_m <= j.anchorage_radius_m
+         THEN j.nearest_anchorage END                     AS anchorage_name,
+    j.latitude,
+    j.longitude,
+    j.sog,
+    j.nav_status_code,
+    j.draught,
+    j.received_at_utc,
+    -- 이름표로 쓴 VTS 최신 이벤트 (판정 근거를 화면·보고서가 그대로 보여줄 수 있게)
+    j.io_vts_name                                         AS vts_event,
+    j.facility_name                                       AS vts_facility_name,
+    j.facility_type                                       AS vts_facility_type,
+    j.job_at_utc                                          AS vts_event_at_utc,
+    j.arrival_at_utc                                      AS vts_arrival_at_utc,
+    (SELECT at FROM snap)                                 AS snapshot_at_utc,
+    round(EXTRACT(EPOCH FROM (now() - j.received_at_utc)) / 60.0)::int
+                                                          AS position_age_min
+FROM judged j;
 
 -- ---------------------------------------------------------------------------
 -- 3. mart.port_call_overview — 입항 통합 (입항건당 대표 1행)
@@ -1115,6 +1333,19 @@ berth AS (
         ('UTK 신항부두',                 14.0)
     ) AS t(wharf_name, chart_depth_m)
 ),
+berth_range AS (
+    -- 선석별 수심이 다른 부두의 "가장 깊은 선석" 수심 (2026-09-18, 울산지방해양수산청
+    -- 울산항시설현황 실조회 — SK5부두 5선석 '7-11m', SK2부두 1선석 7.5m + 4선석 8m).
+    -- VTS 입항 기록엔 선석 번호가 없어(실측: 'SK5부두'로만 옴) 어느 선석인지 모른다.
+    -- 위 목록의 최소 수심으로는 안 되지만 가장 깊은 선석이면 여유가 있는 배는
+    -- '접안 불가'가 아니라 '확인 요청'(CHECK)이다 — 실제로 SK5부두에 12시간째 붙어
+    -- 있는 흘수 7.9m 배가 '접안 불가' 경보로 떴다. 항만은 수심이 맞는 선석에
+    -- 배정하므로, 이 경우 시스템이 할 말은 "어느 선석인지 확인"이지 "불가"가 아니다.
+    SELECT * FROM (VALUES
+        ('SK5부두', 11.0),
+        ('SK2부두',  8.0)
+    ) AS t(wharf_name, depth_max_m)
+),
 vessel AS (
     SELECT DISTINCT ON (upper(btrim(callsgn)))
            upper(btrim(callsgn)) AS callsgn, draught, received_at_utc
@@ -1123,16 +1354,13 @@ vessel AS (
     ORDER BY upper(btrim(callsgn)), received_at_utc DESC
 ),
 pc AS (
-    -- 선석 배정은 UPA 운항관제(upa_port_call)에 있다. port_call_overview 는
-    -- PORT-MIS 신고를 기준행으로 삼으므로, 신고가 아직 없는 배(접안은 했으나
-    -- 신고 미연계)가 빠진다. 흘수 판정은 접안 사실만 있으면 해야 하므로
-    -- 여기서는 upa_port_call 을 직접 본다.
-    SELECT DISTINCT ON (upper(btrim(callsgn)))
-           upper(btrim(callsgn)) AS callsgn, facility_name, arrival_at_utc
-    FROM upa_port_call
-    WHERE nullif(btrim(callsgn), '') IS NOT NULL
-      AND departure_at_utc IS NULL          -- 아직 접안 중인 건만
-    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC
+    -- 지금 선석에 붙어 있는 배 — mart.vessel_presence(2-1, UPA 위치 판정).
+    -- 2026-09-17 전에는 upa_port_call 의 "출항 기록 없는 최신 입항 건"을 접안
+    -- 중으로 봐서 유령 기록·정박지 대기 배까지 흘수 판정 대상이 됐다(2-1 설명).
+    -- facility_name 은 이제 마스터 표기다(berth_name).
+    SELECT callsgn, berth_name AS facility_name, vts_arrival_at_utc AS arrival_at_utc
+    FROM mart.vessel_presence
+    WHERE presence_zone = 'BERTH' AND callsgn IS NOT NULL
 )
 SELECT
     pc.callsgn,
@@ -1147,6 +1375,13 @@ SELECT
     round((v.draught * 0.10)::numeric, 2)               AS ukc_required_m,
     CASE
         WHEN v.draught IS NULL OR b.chart_depth_m IS NULL THEN 'UNKNOWN'
+        -- 가장 얕은 선석 기준으론 부족하지만 가장 깊은 선석이면 UKC 10% 가 나온다
+        -- → 선석 확인 요청 (berth_range 설명)
+        WHEN br.depth_max_m IS NOT NULL
+             AND (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                  - v.draught) < v.draught * 0.10
+             AND (br.depth_max_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                  - v.draught) >= v.draught * 0.10       THEN 'CHECK'
         WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0)
              <= v.draught                                THEN 'NOT_ALLOWED'
         WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
@@ -1155,14 +1390,17 @@ SELECT
     END                                                 AS draught_verdict,
     (SELECT observed_at_utc FROM tide)                  AS tide_observed_at_utc,
     v.received_at_utc                                   AS draught_observed_at_utc,
-    pc.arrival_at_utc
+    pc.arrival_at_utc,
+    -- 선석별 수심이 다른 부두의 가장 깊은 선석 수심 (없으면 chart_depth_m 과 같음)
+    COALESCE(br.depth_max_m, b.chart_depth_m)           AS chart_depth_max_m
 FROM pc
--- ★ 선석 이름은 반드시 mart.facility_alias 를 거친다.
---   pc.facility_name 은 VTS 원문('S-OIL1부두'·'SK1부두 11'·'OTK부두')이고 위 수심표는
---   마스터 표기('S-Oil 1부두'·'SK1부두'·'OTK1부두')다. 예전에는 이 둘을 문자열
---   완전일치로 붙여서 액체화물 전용부두가 통째로 안 맞았다.
+-- ★ 선석 이름은 반드시 마스터 표기로 붙인다.
+--   예전 pc.facility_name 은 VTS 원문('S-OIL1부두'·'SK1부두 11'·'OTK부두')이었고 위
+--   수심표는 마스터 표기('S-Oil 1부두'·'SK1부두'·'OTK1부두')라, 문자열 완전일치로
+--   붙여서 액체화물 전용부두가 통째로 안 맞았다.
 --   실측(2026-08-15): 판정 414건 중 UNKNOWN 387건 = 93.5%.
---   0-B절이 바로 이 문제 때문에 facility_alias 를 만들었는데 이 뷰만 안 거치고 있었다.
+--   지금은 vessel_presence 가 이미 facility_alias 를 거친 마스터 표기를 주고,
+--   facility_alias 에 마스터 표기 자신도 들어 있어(0-B절) 아래 조인이 그대로 맞는다.
 --
 --   더 나쁜 점은 조용했다는 것이다 — safety_index 의 '흘수 여유' 축이 UNKNOWN 을
 --   분모에서 빼기 때문에, 27건만 보고 98점을 내며 93.5%를 못 본 사실이 화면에
@@ -1176,6 +1414,7 @@ FROM pc
 LEFT JOIN mart.facility_alias fa
        ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
 LEFT JOIN berth  b ON b.wharf_name = fa.wharf_name
+LEFT JOIN berth_range br ON br.wharf_name = fa.wharf_name
 LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
@@ -1387,10 +1626,13 @@ FROM upa_vessel_position;
 --    un_no 는 msds_chemical 의 표시용 컬럼이고 WHERE 절에 등장하지 않는다.
 --    화물 manifest 에는 UN 번호만 있으므로, UN → chem_id 변환이 이 뷰의 핵심이다.)
 --
--- ★ "지금"의 정의
---   upa_port_call 에 입항 기록이 있고 departure_at_utc 가 NULL 인 선박 = 재항 중.
---   출항 신고가 확정된 배의 화물은 그 선석에 없으므로 제외한다.
---   (vessel_latest_position 의 presence_state 와 같은 원칙 — 출항은 서류로 확정)
+-- ★ "지금"의 정의 (2026-09-17 개정)
+--   mart.vessel_presence(2-1)에서 presence_zone='BERTH' 인 배 = 지금 선석에 있는 배.
+--   예전엔 "upa_port_call 에 입항 기록이 있고 departure_at_utc 가 NULL"이었는데,
+--   출항 처리가 빠진 유령 기록(7일 넘은 건이 대부분)과 정박지 대기 배까지 들어가
+--   옆 선석 혼재 판정이 있지도 않은 배의 화물로 이뤄졌다.
+--   facility_name 은 그 배가 실제로 붙어 있는 선석(마스터 표기)이다. 합성 manifest
+--   의 facility_name 은 생성 당시 가정한 선석이라 위치 판정 선석을 우선한다.
 --
 -- ★ 한계 (숨기지 않는다)
 --   - is_synthetic=true 인 화물이 섞여 있다. bzentyCd(업체코드) 미확보로 UPA
@@ -1402,18 +1644,15 @@ FROM upa_vessel_position;
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.berth_current_cargo AS
 WITH in_port AS (
-    -- 재항 중인 선박 (출항 신고 없음) — 선박당 최신 입항 건 1개
-    SELECT DISTINCT ON (upper(btrim(callsgn)))
-           upper(btrim(callsgn)) AS callsgn,
-           facility_name,
-           arrival_at_utc
-    FROM upa_port_call
-    WHERE nullif(btrim(callsgn), '') IS NOT NULL
-      AND departure_at_utc IS NULL
-    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC
+    -- 지금 선석에 있는 배 (UPA 위치 판정, 선박당 1행)
+    SELECT callsgn,
+           berth_name          AS facility_name,
+           vts_arrival_at_utc  AS arrival_at_utc
+    FROM mart.vessel_presence
+    WHERE presence_zone = 'BERTH' AND callsgn IS NOT NULL
 )
 SELECT DISTINCT
-       COALESCE(cm.facility_name, ip.facility_name) AS facility_name,
+       ip.facility_name,
        ip.callsgn,
        cm.chem_id,
        cm.cas_no,
