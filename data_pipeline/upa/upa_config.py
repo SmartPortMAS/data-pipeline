@@ -211,5 +211,17 @@ ANCHRG_INFO = {
     },
     "numeric_cols": ["latitude", "longitude", "radius_m"],
     "utc_cols": [],
-    "key_cols": ["anchorage_name"],
+    # (2026-09-20) anchorage_name -> (facility_code, index_no) 로 교체.
+    #
+    # 이 API 는 정박지 하나를 **폴리곤 정점 여러 행**으로 준다(E3 는 41행).
+    # 키를 anchorage_name 으로 두면 정박지당 1행만 남아 두 가지가 깨진다:
+    #   1) berth_neo4j_loader.fetch_anchorage_rows() 가 정점 평균으로 중심좌표를
+    #      구하는데(그 함수 주석이 '폴리곤 정점 다수'를 전제한다) 정점이 1개만
+    #      남아 centroid 가 사실상 임의의 한 점이 된다.
+    #   2) 같은 이름에 POLYGON 행(remark 있음)과 TEXT 행(remark 없음)이 함께
+    #      오는데 뒤에 온 TEXT 가 이겨서 **톤급 제한이 NULL 로 덮인다.**
+    #      실측: E3·M1~M7 8곳의 remark 가 사라져 있었다(정박지 배정 336건 중 154건).
+    #
+    # (facility_code, index_no) 는 staging 156행을 전부 유일하게 식별한다.
+    "key_cols": ["facility_code", "index_no"],
 }

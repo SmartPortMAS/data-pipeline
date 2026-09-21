@@ -39,7 +39,13 @@ TABLE_MAP = {
     # 2026-08 MMSI-First: callsgn → vessel_uid.
     # callsgn 은 결측 가능해 유니크 인덱스에서 NULL 이 서로 다른 값으로 취급되고,
     # ON CONFLICT 가 걸리지 않아 폴링마다 중복 행이 쌓였다 (실증 확인).
-    "upa_vessel_position_stg.csv": ("upa_vessel_position", ["vessel_uid", "received_at_utc"]),
+    #
+    # 2026-09-13: received_at_utc 를 키에서 뺐다 — 선박당 최신 1행만 유지한다.
+    # 이 테이블의 이력을 읽는 코드가 없고(소비처는 전부 최신 1행만 꺼내 쓴다),
+    # 접안 판정도 '정박(계류) + 선석 400m 이내' 순간 판정으로 성립한다.
+    # 이력 축적은 물리 마트(ulsan_vessel_mart)가 맡는다. 상세 근거는
+    # backend/alembic/versions/0018_vessel_position_latest_only.py 참고.
+    "upa_vessel_position_stg.csv": ("upa_vessel_position", ["vessel_uid"]),
     # 입항 건(port_call_id) 하나에 입항·접안·이안·출항 이벤트가 comm_count 로 나뉘어
     # 여러 행 온다. 키를 port_call_id 만으로 두면 이벤트가 1행으로 합쳐져
     # "언제 접안했고 언제 이안했는지"가 사라진다 → 이벤트 단위 복합키로 보존한다.
@@ -47,7 +53,13 @@ TABLE_MAP = {
     "upa_port_call_stg.csv": ("upa_port_call", ["port_call_id", "comm_count"]),
     "upa_cargo_manifest_stg.csv": ("upa_cargo_manifest", ["record_uid"]),
     "upa_berth_facility_stg.csv": ("upa_berth_facility", ["wharf_name"]),
-    "upa_anchorage_stg.csv": ("upa_anchorage", ["anchorage_name"]),
+    # (2026-09-20) anchorage_name -> (facility_code, index_no).
+    # 정박지 하나가 폴리곤 정점 여러 행으로 오는데(E3 는 41행) 이름을 키로 두면
+    # 1행만 남는다. 그 결과 (a) berth_neo4j_loader 의 centroid 계산이 정점 1개로
+    # 무너지고 (b) 같은 이름의 TEXT 행(remark 없음)이 POLYGON 행(제한 있음)을
+    # 덮어써 **톤급 제한이 사라진다** — 실측상 E3·M1~M7 8곳이 그랬다.
+    # 상세 근거는 upa_config.ANCHRG_INFO 주석 참고.
+    "upa_anchorage_stg.csv": ("upa_anchorage", ["facility_code", "index_no"]),
 }
 
 
