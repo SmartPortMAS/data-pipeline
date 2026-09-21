@@ -3,7 +3,7 @@
 API: http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst
 저장 위치: data/raw/weather_forecast/weather_forecast_<발표시각>_raw.json
 
-격자: 울산항 nx=102, ny=84 (기상청 고유 격자좌표계, 위경도 아님)
+격자: FORECAST_GRIDS — 온산항 부두 (103, 82) + 울산 시내 (102, 84) (기상청 고유 격자좌표계)
 수집 항목: 이 API 응답에 포함된 전체 카테고리 중 기상분석 에이전트가 쓰는
            WSD(풍속)·WAV(파고)를 포함해 TMP·PTY·SKY·POP 등도 원본 그대로 저장한다
            (선별은 전처리 단계에서).
@@ -27,9 +27,24 @@ API_KEY = os.getenv("KMA_API_KEY", "")
 BASE_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst"
 RAW_DIR = "data/raw/weather_forecast"
 
-# 울산항 격자좌표 (위경도 아님, 기상청 고유 좌표계)
+# 옛 이름 그대로 둔다 — backend weather 에이전트(data_access.ULSAN_PORT_NX/NY)가 이 격자를
+# 읽고 있어, 그쪽을 바꾸기 전까지는 이 격자도 계속 수집해야 판정이 끊기지 않는다.
 ULSAN_PORT_NX = 102
 ULSAN_PORT_NY = 84
+
+# ★ 2026-09-21 정정 — (102, 84) 는 울산항이 아니라 울산시청(35.54N 129.31E) 격자다.
+#   기상청 격자 변환식(LCC, 서울시청 → (60,127) 로 검산)으로 부두 좌표를 넣어 보면
+#     온산 UTK·OTK(처용리)   → (102, 82)   육지 격자 — 파고 0
+#     온산 S-Oil·정일(산암리) → (103, 82)   바다 격자 — 파고 제공
+#     울산 본항 SK부두        → (103, 83)
+#   (102, 84) 는 육지 격자라 파고(WAV)가 늘 0 이다 — 7/25 이후 수집분 558건 전부 0.
+#   그래서 파고 기준으로는 예보 경보가 한 번도 나올 수 없었고, 풍속도 시내 값이라
+#   항구보다 낮게 잡혔다(9/21 발표 최대 풍속: 시내 5.4 m/s vs 온산 (103,82) 7.0 m/s).
+#   온산 부두의 기준 격자는 (103, 82) — 온산 부두 11곳이 면한 바다 격자다.
+FORECAST_GRIDS = [
+    (103, 82, "온산항 부두(산암리 바다 격자)"),
+    (ULSAN_PORT_NX, ULSAN_PORT_NY, "울산 시내(울산시청) — 옛 '울산항' 격자"),
+]
 
 KST = timezone(timedelta(hours=9))
 
@@ -87,32 +102,45 @@ def fetch_forecast(nx: int = ULSAN_PORT_NX, ny: int = ULSAN_PORT_NY) -> list[dic
 
 
 def collect_weather_forecast_raw() -> str:
+    """FORECAST_GRIDS 격자마다 최신 발표분을 받아 격자별 raw 파일로 저장한다.
+
+    한 격자가 실패해도 나머지는 저장한다. 전부 실패하면 예외를 올린다.
+    반환: 마지막으로 저장한 파일 경로.
+    """
     os.makedirs(RAW_DIR, exist_ok=True)
+    saved, errors = [], []
+    for nx, ny, name in FORECAST_GRIDS:
+        print(f"[단기예보 수집] {name} 격자 nx={nx} ny={ny}")
+        try:
+            items = fetch_forecast(nx, ny)
+        except Exception as e:  # noqa: BLE001 — 격자 하나 실패로 전체를 멈추지 않는다
+            print(f"  [실패] {e}")
+            errors.append(f"({nx},{ny}) {e}")
+            continue
+        print(f"  -> {len(items)}건 (카테고리 x 예보시각 조합 전체)")
 
-    print(f"[단기예보 수집] 울산항 격자 nx={ULSAN_PORT_NX} ny={ULSAN_PORT_NY}")
-    items = fetch_forecast()
-    print(f"  -> {len(items)}건 (카테고리 x 예보시각 조합 전체)")
+        base_date = items[0]["baseDate"] if items else ""
+        base_time = items[0]["baseTime"] if items else ""
+        payload = {
+            "collected_at_utc": datetime.now(timezone.utc).isoformat(),
+            "source": "KMA_VILAGE_FCST",
+            "grid": {"nx": nx, "ny": ny, "name": name},
+            "base_date": base_date,
+            "base_time": base_time,
+            "record_count": len(items),
+            "data": items,
+        }
+        # 격자를 파일명에 넣는다 — 같은 발표 시각의 두 격자가 서로 덮어쓰지 않게.
+        # 전처리기의 glob(weather_forecast_*_raw.json)은 옛 이름·새 이름 둘 다 읽는다.
+        output_path = os.path.join(RAW_DIR, f"weather_forecast_{base_date}_{base_time}_{nx}_{ny}_raw.json")
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        print(f"  [저장] {output_path}")
+        saved.append(output_path)
 
-    collected_at_utc = datetime.now(timezone.utc).isoformat()
-    base_date = items[0]["baseDate"] if items else ""
-    base_time = items[0]["baseTime"] if items else ""
-
-    payload = {
-        "collected_at_utc": collected_at_utc,
-        "source": "KMA_VILAGE_FCST",
-        "grid": {"nx": ULSAN_PORT_NX, "ny": ULSAN_PORT_NY, "name": "울산항"},
-        "base_date": base_date,
-        "base_time": base_time,
-        "record_count": len(items),
-        "data": items,
-    }
-
-    output_path = os.path.join(RAW_DIR, f"weather_forecast_{base_date}_{base_time}_raw.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-    print(f"  [저장] {output_path}")
-    return output_path
+    if not saved:
+        raise RuntimeError("단기예보 수집 전부 실패: " + "; ".join(errors))
+    return saved[-1]
 
 
 if __name__ == "__main__":
