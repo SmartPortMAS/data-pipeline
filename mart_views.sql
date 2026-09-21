@@ -347,6 +347,17 @@ manual_alias AS (
         ('용잠부두 02',            '용잠2부두',        'BERTH'),
         ('SK부이 02',              'SK2부이',          'BERTH'),
         ('SK부이 03',              'SK3부이',          'BERTH'),
+        -- [2026-09-22] '유화1부두'를 아래 other_facility(비선석)에서 여기로 옮겼다.
+        --   근거: portmis_facility_map(MDW/01, facility_nm='유화1부두')이
+        --   wharf_name='대한유화부두'로 이미 매핑돼 있고, 두 사전이 겹치는 70종
+        --   중 이 한 줄만 서로 어긋나 있었다(69 일치 / 1 불일치, 실측).
+        --   대조 근거: upa_berth_facility 에서 이름에 '유화'가 들어가는 시설은
+        --   대한유화부두 하나뿐(온산항, 운영사 대한유화㈜, 12m, 320m)이고,
+        --   upa_port_call 의 '유화1부두' 54건도 전부 온산항 건이다.
+        --   PORT-MIS 코드(MDW)와 UPA 코드(MWD)가 뒤집혀 있어 코드로는 못 붙고
+        --   이름으로만 붙는다 — 그래서 자동 규칙이 아니라 이 사전에 둔다.
+        --   min=max=12m 라 선석 간 수심 차가 없어 WHARF 수준 매칭으로 충분하다.
+        ('유화1부두',              '대한유화부두',     'BERTH'),
         ('정박지-E1',              'E1',               'ANCHORAGE'),
         ('정박지-E2',              'E2',               'ANCHORAGE'),
         ('정박지-E3',              'E3',               'ANCHORAGE')
@@ -358,7 +369,8 @@ other_facility AS (
         '장생포호안', '이진물양장', '현중해양의장안벽',
         '현대미포의장안벽01', '현대미포의장안벽02', '현대미포의장안벽03',
         '현대미포의장안벽04', '현대미포의장안벽05',
-        '우봉물양장', '신항부두작업장', '유화1부두', '세방신항부두',
+        -- '유화1부두' 는 2026-09-22 에 manual_alias(대한유화부두)로 옮겼다 — 위 설명.
+        '우봉물양장', '신항부두작업장', '세방신항부두',
         '매암부두', 'S-OIL 2부이'
     ]) AS source_name
 ),
@@ -1359,13 +1371,27 @@ wharf_depth AS (
     WHERE w.min_water_depth_m IS NOT NULL
       AND strpos(w.wharf_name, '부이') = 0
 ),
-vessel AS (
+ais_draught AS (
     -- 흘수 0 은 "0m"가 아니라 "선박이 보내지 않음"이다(dev 2026-09-21).
     SELECT DISTINCT ON (upper(btrim(callsgn)))
            upper(btrim(callsgn)) AS callsgn, draught, received_at_utc
     FROM upa_vessel_position
     WHERE nullif(btrim(callsgn), '') IS NOT NULL AND draught > 0
     ORDER BY upper(btrim(callsgn)), received_at_utc DESC
+),
+vessel AS (
+    -- [2026-09-22] AIS 미송출 시 PORT-MIS 등록 흘수로 폴백 — mart.dashboard_current
+    --   의 draught 와 같은 규칙이어야 한다. 두 화면이 서로 다른 흘수를 쓰면
+    --   UKC 표와 판정 결과가 어긋난다(같은 배에 다른 답).
+    --   received_at_utc 는 AIS 관측에만 있는 값이라 폴백 행에서는 NULL —
+    --   화면의 '흘수 관측시각'이 등록값을 관측인 양 보이면 안 되기 때문이다.
+    SELECT COALESCE(a.callsgn, upper(btrim(vs.callsgn)))    AS callsgn,
+           COALESCE(a.draught, vs.draught_m)                AS draught,
+           a.received_at_utc
+    FROM ais_draught a
+    FULL JOIN vessel_spec vs
+           ON upper(btrim(vs.callsgn)) = a.callsgn
+    WHERE COALESCE(a.draught, vs.draught_m) IS NOT NULL
 ),
 pc AS (
     SELECT callsgn, berth_name AS facility_name, vts_arrival_at_utc AS arrival_at_utc
@@ -1451,7 +1477,17 @@ SELECT
     p.sog,
     p.cog,
     p.heading,
-    p.draught,
+    -- [2026-09-22] AIS 흘수 0 → PORT-MIS 등록 흘수(vessel_spec) 폴백.
+    --   AIS 규격상 draught=0 은 "0m"가 아니라 "미송출"이다. 그런데 이 값이
+    --   그대로 arrival_watcher 로 흘러가 "흘수 정보가 없어 수심 여유를 계산할
+    --   수 없습니다"(판정불가)가 됐다 — 실측 2건(다인3호·비케이25). 두 배 모두
+    --   vessel_spec 에 흘수가 멀쩡히 있었다(3.4m·4.4m). 근거가 없어서가 아니라
+    --   있는 근거를 안 읽어서 난 판정불가라, 회의 §4 의 '근거 부족'에 해당하지
+    --   않는다.
+    --   방향도 안전측이다 — vessel_spec 은 만재흘수라 실측보다 크거나 같다
+    --   (둘 다 있는 184척 중 136척에서 spec >= AIS, 평균 7.42m vs 6.34m).
+    --   AIS 값이 있으면 그쪽이 언제나 우선이다(실제 적재 상태를 반영하므로).
+    COALESCE(nullif(p.draught, 0), vs.draught_m)        AS draught,
     p.nav_status_code,
     p.received_at_utc,
     p.position_source,
@@ -1501,7 +1537,14 @@ SELECT
     p.position_age_min,
     p.presence_state,
     p.doc_still_in_port,
-    p.signal_health
+    p.signal_health,
+    -- 위 draught 가 어디서 왔는지. 판정 근거를 화면·보고서가 숨기지 않게 한다.
+    --   AIS      실제 적재 상태(관측값)
+    --   REGISTER PORT-MIS 등록 만재흘수(보수적 대체값)
+    --   NULL     양쪽 다 없음 → 판정불가가 맞는 답
+    CASE WHEN nullif(p.draught, 0) IS NOT NULL THEN 'AIS'
+         WHEN vs.draught_m IS NOT NULL         THEN 'REGISTER'
+    END                                                 AS draught_source
 FROM mart.vessel_latest_position p
 CROSS JOIN LATERAL (
     SELECT CASE
@@ -1520,6 +1563,8 @@ CROSS JOIN LATERAL (
 LEFT JOIN mart.vessel_identity     vi  ON vi.vessel_uid = p.vessel_pos_key
 LEFT JOIN mart.port_call_overview  pco ON pco.callsgn = p.callsgn
 LEFT JOIN msds_by_vessel           mv  ON mv.callsgn = p.callsgn
+-- 흘수 폴백 전용 — callsgn 당 1행임을 확인했다(410행 / 고유 410).
+LEFT JOIN vessel_spec              vs  ON upper(btrim(vs.callsgn)) = p.callsgn
 LEFT JOIN mart.weather_now         wn  ON TRUE;
 
 -- ---------------------------------------------------------------------------
