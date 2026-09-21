@@ -54,6 +54,8 @@
 --        위치 --vessel_uid--> 자기 자신 집계,  PORT-MIS --callsgn--> 선종
 --   2. mart.vessel_latest_position 선박별 최신 위치 1행 (UPA 우선, AIS 보강)
 --        UPA∪AIS --vessel_uid--> 최신 1행,  upa_port_call --callsgn--> 출항확정
+--   2-1. mart.vessel_presence      지금 선석·정박지에 실제로 있는 배 (UPA 위치 판정)
+--        위치 --좌표--> 선석·정박지 구역,  upa_port_call --callsgn--> 신고 선석 이름표
 --   3. mart.port_call_overview     입항 통합 (입항건당 대표 1행)
 --        PORT-MIS ∙ UPA운항 ∙ 화물 전부 --callsgn-->
 --   4. mart.cargo_msds             화물 ↔ MSDS (★안전관제 핵심)
@@ -61,12 +63,12 @@
 --   5. mart.weather_now            환경 최신 1행 (기상+조위+파고+조류 스냅샷)
 --        --observed_at_utc--> 각 관측 최신값
 --   5-1. mart.berth_draught_check  조위 반영 가용수심 · UKC 판정
---        입항 --facility_name--> 선석 수심,  입항 --callsgn--> 흘수
+--        선석 재선(2-1) --berth_name--> 선석 수심,  --callsgn--> 흘수
 --   6. mart.dashboard_current      '한 줄 조회' — 대시보드·에이전트 진입점
 --        위치 --vessel_uid--> 식별 / 위치 --callsgn--> 입항·화물 / 기상 CROSS
 --   7. mart.pipeline_health        수집기 생존 신호 (조인 없음, 단일 집계행)
 --   8. mart.berth_current_cargo    선석별 현재 취급 화물 → chem_id (백엔드 소비 계약)
---        재항선박 --callsgn--> 화물 --dg_un_no--> MSDS --> chem_id
+--        선석 재선(2-1) --callsgn--> 화물 --dg_un_no--> MSDS --> chem_id
 --        ★ backend/app/agents/scheduling/category_map.py 의 카테고리 대표값
 --          근사를 대체한다 (그 파일 주석이 이 뷰를 기다리고 있다)
 --   (+ mart.msds_flat             msds_chemical JSONB 평탄화 — cargo_msds 가 사용)
@@ -100,19 +102,54 @@ CREATE SCHEMA IF NOT EXISTS mart;
 --   있으면 에러로 드러나게 둔다 — 조용한 파괴보다 시끄러운 실패가 낫다.
 --
 -- ★ 삭제 순서 = 생성 역순 (의존하는 쪽을 먼저 지운다)
+--
+--   2026-09-17 수정 — facility_alias 에 기대는 berth_dwell_stats·berth_draught_check
+--   가 facility_alias 보다 뒤에 지워지고 있었다. 기존 DB 에서 DROP MATERIALIZED
+--   VIEW 가 "other objects depend on it" 으로 실패하고, psql 기본값(ON_ERROR_STOP
+--   off)이 그 에러를 넘겨 facility_alias 가 옛 정의로 계속 남아 있었다.
+--   의존하는 뷰를 모두 앞으로 옮겼다 — psql -v ON_ERROR_STOP=1 로 끝까지 통과한다.
 -- ---------------------------------------------------------------------------
+--   2026-09-22 추가 — 감사·승인 뷰(7절)를 여기로 들여왔고, 그 김에 순서를
+--   "아무도 참조하지 않는 최상위 소비 뷰부터"로 다시 세웠다. dashboard_current 가
+--   arrival_schedule 을 참조하는데 arrival_schedule 이 먼저 지워지고 있어서
+--   막혔다(실측 2026-09-22). 최상위부터 지우면 이런 역전이 생기지 않는다.
+--
+-- 순서는 pg_depend 로 실제 의존 그래프를 위상정렬해 뽑았다(2026-09-22). 손으로
+-- 짜맞추면 이번처럼 한 번에 하나씩만 드러나 세 번 막힌다. 다시 틀어지면:
+--   WITH edges AS (SELECT DISTINCT dep.relname child, src.relname parent
+--     FROM pg_depend d JOIN pg_rewrite r ON r.oid=d.objid
+--     JOIN pg_class dep ON dep.oid=r.ev_class JOIN pg_class src ON src.oid=d.refobjid
+--     JOIN pg_namespace ns ON ns.oid=src.relnamespace
+--     WHERE ns.nspname='mart' AND dep.relname<>src.relname) ...
+--
+-- 3층 — 가장 위 (아무도 참조하지 않는다)
 DROP VIEW IF EXISTS mart.berth_current_cargo;
+DROP VIEW IF EXISTS mart.dashboard_current;
+DROP VIEW IF EXISTS mart.pipeline_health;
+DROP VIEW IF EXISTS mart.approval_candidates;
+DROP VIEW IF EXISTS mart.berth_audit;
+DROP VIEW IF EXISTS mart.anchorage_audit;
+DROP VIEW IF EXISTS mart.berth_facility_traffic;
+DROP VIEW IF EXISTS mart.berth_dwell_stats;
+-- berth_occupancy_live 는 mart.vessel_presence 로 대체돼 더는 만들지 않는다(7절 주석).
+DROP VIEW IF EXISTS mart.berth_occupancy_live;
+-- 2층
+DROP VIEW IF EXISTS mart.berth_draught_check;
+DROP VIEW IF EXISTS mart.berth_occupancy;
+DROP VIEW IF EXISTS mart.anchorage_limit;
+DROP VIEW IF EXISTS mart.arrival_schedule;
+DROP VIEW IF EXISTS mart.cargo_msds;
+-- 1층
+DROP VIEW IF EXISTS mart.msds_flat;
+DROP VIEW IF EXISTS mart.vessel_presence;
+DROP VIEW IF EXISTS mart.port_call_overview;
+DROP VIEW IF EXISTS mart.vessel_latest_position;
+-- 0층 — 뿌리
 DROP MATERIALIZED VIEW IF EXISTS mart.facility_alias;
 DROP FUNCTION IF EXISTS mart.norm_berth(text);
 DROP FUNCTION IF EXISTS mart.norm_facility(text);
-DROP VIEW IF EXISTS mart.pipeline_health;
-DROP VIEW IF EXISTS mart.dashboard_current;
-DROP VIEW IF EXISTS mart.berth_draught_check;
 DROP VIEW IF EXISTS mart.weather_now;
-DROP VIEW IF EXISTS mart.cargo_msds;
-DROP VIEW IF EXISTS mart.msds_flat;
-DROP VIEW IF EXISTS mart.port_call_overview;
-DROP VIEW IF EXISTS mart.vessel_latest_position;
+DROP VIEW IF EXISTS mart.berth_handling_cargo;
 DROP VIEW IF EXISTS mart.vessel_identity;
 
 -- ---------------------------------------------------------------------------
@@ -327,6 +364,8 @@ other_facility AS (
 ),
 source_names AS (
     -- upa_port_call(VTS 원문) + upa_cargo_manifest(합성 화물의 자체 표기) 합집합.
+    -- (아래 사고 설명은 2026-09-17 전 정의 기준. 지금 berth_current_cargo.facility_name
+    --  은 위치 판정 선석의 마스터 표기라 맨 아래 마스터 자신 항목으로 붙는다.)
     -- 둘이 서로 다른 어휘를 쓴다 — berth_current_cargo.facility_name은
     -- COALESCE(cm.facility_name, ip.facility_name)라(뷰 8번 정의) 화물이 매칭된
     -- 행은 합성 manifest 표기('S-Oil 1부두', 이미 정돈된 형태)로 나오고 화물이
@@ -340,6 +379,14 @@ source_names AS (
     SELECT DISTINCT facility_name
     FROM upa_cargo_manifest
     WHERE facility_name IS NOT NULL AND btrim(facility_name) <> ''
+    UNION
+    -- 마스터 표기 자신. mart.vessel_presence(2-1)는 좌표로 찾은 선석을 마스터
+    -- 표기로 내보내는데, 'UTK 신항부두'·'신항컨부두' 같은 27종은 VTS·manifest
+    -- 어느 쪽에도 그 표기로 나온 적이 없어(2026-09-17 실측) 이 사전을 거치는
+    -- 소비자(scheduling/service.py)가 그 선석의 화물을 못 찾았다.
+    SELECT DISTINCT wharf_name
+    FROM upa_berth_facility
+    WHERE wharf_name IS NOT NULL AND btrim(wharf_name) <> ''
 ),
 matched AS (
     SELECT
@@ -530,9 +577,8 @@ LEFT JOIN pm_latest m ON m.callsgn = b.callsgn;
 
 -- ---------------------------------------------------------------------------
 -- 2. mart.vessel_latest_position — 선박별 최신 위치 1행
---    UPA 항내 선박위치(기본 소스)를 우선하되, 레거시 AIS 관측이 더 최신이면
---    그것을 쓴다 (mmsi → vessel_identity 로 callsgn 역매핑). position_source
---    컬럼으로 어느 소스의 관측인지 표시한다.
+--    UPA 항내 선박위치 단일 소스 (2026-09-17 레거시 AIS 합치기 제거 — 아래 unified
+--    주석). position_source 컬럼은 소비자 호환을 위해 'UPA' 로 남겨 둔다.
 --
 --    [MMSI-First] 예전에는 callsgn 없는 UPA 관측을 통째로 버려서 관공선·
 --    소방정·순찰선 등이 지도에서 사라졌다. 이제 MMSI 를 1차 키로 쓰고
@@ -542,15 +588,20 @@ LEFT JOIN pm_latest m ON m.callsgn = b.callsgn;
 --      않는다. 소비 측은 now() - received_at_utc 로 신선도를 판단할 것.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.vessel_latest_position AS
-WITH unified AS (
+-- MATERIALIZED: AIS 합치기(UNION ALL)를 뺀 뒤 플래너가 이 CTE 를 바깥
+-- dashboard_current 조인 안으로 풀어 넣으면서 /vessels 조회가 1.5초 → 4초로
+-- 느려졌다(2026-09-17 실측). 한 번 계산해 두게 하면 1.1초다.
+WITH unified AS MATERIALIZED (
     SELECT COALESCE(mmsi::text, 'CS:' || upper(btrim(callsgn))) AS vessel_uid,
            nullif(upper(btrim(callsgn)), '')  AS callsgn,
            mmsi,
            latitude,
            longitude,
-           sog,
-           cog,
-           heading,
+           -- AIS 합치기가 있을 때 타입이 double precision 으로 올라가 있었다.
+           -- 소비자 계약(JSON 실수)을 그대로 두려고 명시적으로 맞춘다.
+           sog::double precision      AS sog,
+           cog::double precision      AS cog,
+           heading::double precision  AS heading,
            draught,
            nav_status_code::text      AS nav_status_code,
            received_at_utc,
@@ -559,33 +610,13 @@ WITH unified AS (
     FROM upa_vessel_position
     WHERE mmsi IS NOT NULL
        OR nullif(btrim(callsgn), '') IS NOT NULL
-
-    UNION ALL
-
-    SELECT a.mmsi::text,
-           vi.callsgn,
-           a.mmsi,
-           a.latitude,
-           a.longitude,
-           a.sog,
-           a.cog,
-           -- AIS(레거시 웹소켓) 응답에는 heading/draught 가 없다(ais_vessel_position
-           -- 테이블 자체에 컬럼 없음, Alembic 0002 참조). UPA 소스가 기본이라
-           -- 실사용에 지장 없지만, 값 없음과 0 을 혼동하지 않도록 명시적으로 NULL.
-           NULL::double precision     AS heading,
-           NULL::double precision     AS draught,
-           a.nav_status_code::text,
-           a.received_at_utc,
-           a.quality_flag,
-           'AIS'
-    FROM ais_vessel_position a
-    LEFT JOIN (
-        SELECT DISTINCT ON (mmsi) mmsi, callsgn
-        FROM mart.vessel_identity
-        WHERE mmsi IS NOT NULL
-        ORDER BY mmsi
-    ) vi ON vi.mmsi = a.mmsi
-    WHERE a.mmsi IS NOT NULL
+    -- ★ 2026-09-17 — 레거시 AIS(ais_vessel_position) 합치기를 뺐다.
+    --   aisstream 수신은 멈췄고(1,112행, LEGACY_DOMAINS) 그 행은 received_at_utc 가
+    --   전부 NULL 이었다. 아래 DISTINCT ON ... ORDER BY received_at_utc DESC 에서
+    --   NULL 이 맨 앞에 오므로(DESC 기본값 NULLS FIRST) 411척이 지금 UPA 위치 대신
+    --   옛 AIS 좌표(부산 앞바다 등)·"신호 없음"으로 보였다 — 온산 선석에 접안해
+    --   있는 배 6척이 지도·KPI 에서 빠진 것도 이 때문이었다.
+    --   선박 위치의 정본은 UPA 선박위치 하나다(메모: vessel-state-truth).
 ),
 -- 서류상 재항 여부 — 출항은 "추정"하지 않고 upa_port_call 로 "확정"한다.
 -- departure_at_utc 가 NULL 인 최신 입항 건이 있으면 아직 항내에 있다는 신고 상태.
@@ -620,7 +651,7 @@ latest AS (
            u.position_source
     FROM unified u
     LEFT JOIN mart.vessel_identity vi2 ON vi2.vessel_uid = u.vessel_uid
-    ORDER BY u.vessel_uid, u.received_at_utc DESC
+    ORDER BY u.vessel_uid, u.received_at_utc DESC NULLS LAST
 )
 SELECT l.*,
        -- ↓ 신규 컬럼 (CREATE OR REPLACE 제약상 반드시 맨 뒤에 추가할 것)
@@ -675,6 +706,234 @@ SELECT l.*,
 FROM latest l
 LEFT JOIN still_in_port s ON s.callsgn = l.callsgn
 LEFT JOIN departed_doc  d ON d.callsgn = l.callsgn;
+
+-- ---------------------------------------------------------------------------
+-- 2-1. mart.vessel_presence — 지금 선석·정박지에 "실제로 있는" 배 (선박당 1행)
+--
+-- ★ 왜 위치로 판정하나 — upa_port_call 은 "신고 이벤트"다 (2026-09-17 실측)
+--   (a) 유령: 출항 처리가 빠진 건이 남는다. "입항했고 출항 기록 없음"으로 세면
+--       선석 58곳에 818척이 점유 중이었고, 그중 775척은 입항한 지 7일이 넘었다.
+--   (b) 구간이 넓다: 입항~출항에는 정박지 대기·이선이 다 들어 있다. 최근 40일
+--       완료 입항 건의 체류 중 정지 위치 4,373개 중 47%가 신고 선석에서 2km
+--       밖이었다(대부분 정박(앵커링)). 이 구간으로 세면 정박지에 있는 배가
+--       선석을 점유한 것으로 나온다.
+--   (c) 입항 건 하나가 이벤트 여러 행(입항·접안·이선·이안·투묘·양묘·출항)이고
+--       행마다 시설이 다르다. DISTINCT ON (port_call_id) ORDER BY arrival_at_utc
+--       는 arrival 이 모든 행에서 같아서 아무 이벤트의 시설이나 집는다.
+--   → "지금 어디 있나"는 UPA 선박위치로 판정하고, port_call 은 "어느 선석으로
+--     신고했나"라는 이름표(배마다 최신 이벤트 1행)로만 쓴다.
+--     port_call 의 이력·통계 용도(berth_dwell_stats, 백테스트)는 그대로 둔다.
+--
+-- ★ 판정 규칙
+--   대상      선박별 최신 UPA 위치 1행. 최신 수집 시각에서 3시간 이내만(EC2 수집
+--             1시간 주기). now() 가 아니라 최신 수집 시각 기준이라 수집이 멈춰도
+--             화면이 "빈 항만"이 되지 않고 마지막 스냅샷을 보여준다 — 그 시각은
+--             snapshot_at_utc 로 함께 내보내고, 수집 정지 경고는 pipeline_health 몫.
+--   BERTH     정지(sog ≤ 0.5kn) · 정박(앵커링) 아님 · VTS 입항 기록이 있는 배이고
+--             ① 최신 VTS 이벤트(입항·접안·이선)의 선석이 1km 안 → 그 선석 ('신고+위치')
+--             ② 아니면 가장 가까운 선석이 300m 안             → 그 선석 ('위치')
+--             ③ 신고 선석에 좌표가 없고(부이 등) 정박지 구역 밖  → 신고 선석 ('신고')
+--   ANCHORAGE BERTH 가 아니고, 정지 또는 정박(앵커링)이며 정박지 구역(upa_anchorage) 안
+--   STOPPED   그 밖의 정지·묘박 — 조선소 의장안벽·물양장·예인선 대기 등
+--   UNDERWAY  그 밖
+--
+-- ★ 임계값 근거 (최근 40일 완료 입항 건의 체류 중 정지 위치 실측, 2026-09-17)
+--   - 신고 선석 좌표까지 1km 안 2,143개 중 95%가 600m 안. 선석 좌표가 선석당 한
+--     점이고 SK5부두(798m)·6부두(990m)처럼 긴 안벽이 있어 1km 로 둔다.
+--   - 가장 가까운 선석이 신고 선석과 같은 비율은 300m 안에서도 64%뿐이다. 이웃
+--     선석 간격이 200~400m 라 좌표만으로는 옆 선석과 헷갈린다 → 신고 선석을 먼저
+--     보고, 가장 가까운 선석은 신고가 없거나 1km 밖일 때만 쓴다(berth_basis 로 구분).
+--     용잠1·2부두는 원천 좌표가 똑같아 ②로는 구분되지 않는다(이름순 첫 번째).
+--   - "VTS 입항 기록이 있는 배" 조건: 예인선·급유선·관공선 수십 척이 부두 근처에
+--     모여 정지해 있어, 이 조건이 없으면 상선 선석 점유가 부풀었다.
+--   - 좌표가 없는 선석 9곳(부이 4기·북신항 등)은 거리로 확인할 수 없어 ③처럼 신고에
+--     기댄다. 그래도 "지금 위치가 새로 들어오고 정지해 있다"는 조건은 같이 걸려
+--     유령 기록은 걸러진다. 신고도 없는 배가 그곳에 있으면 모른다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION mart.dist_m(double precision, double precision,
+                                       double precision, double precision)
+RETURNS double precision AS $$
+    -- 하버사인 거리(m). 인자 순서: 위도1, 경도1, 위도2, 경도2
+    SELECT 6371000 * 2 * asin(sqrt(
+        power(sin(radians($3 - $1) / 2), 2)
+        + cos(radians($1)) * cos(radians($3)) * power(sin(radians($4 - $2) / 2), 2)));
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE VIEW mart.vessel_presence AS
+WITH snap AS (
+    SELECT max(received_at_utc) AS at FROM upa_vessel_position
+),
+pos AS (
+    SELECT DISTINCT ON (v.vessel_uid)
+           v.vessel_uid,
+           nullif(upper(btrim(v.callsgn)), '') AS callsgn_obs,
+           v.mmsi, v.vessel_name, v.latitude, v.longitude, v.sog,
+           v.nav_status_code, v.draught, v.received_at_utc
+    FROM upa_vessel_position v
+    CROSS JOIN snap
+    WHERE v.received_at_utc > snap.at - interval '3 hours'
+      AND v.latitude IS NOT NULL AND v.longitude IS NOT NULL
+    ORDER BY v.vessel_uid, v.received_at_utc DESC
+),
+cs AS (
+    -- 최신 관측에 호출부호가 빠진 배(정적신호 간헐 결측)는 같은 배의 마지막 값으로 보강.
+    -- 지금 보이는 배로만 좁혀 훑는다(전체 정렬은 조회마다 0.1초 이상).
+    SELECT DISTINCT ON (vessel_uid) vessel_uid, upper(btrim(callsgn)) AS callsgn
+    FROM upa_vessel_position
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+      AND vessel_uid IN (SELECT vessel_uid FROM pos)
+    ORDER BY vessel_uid, received_at_utc DESC
+),
+ident AS (
+    SELECT p.*, COALESCE(p.callsgn_obs, cs.callsgn) AS callsgn
+    FROM pos p
+    LEFT JOIN cs ON cs.vessel_uid = p.vessel_uid
+),
+berth AS (
+    SELECT DISTINCT ON (wharf_name) wharf_name, latitude, longitude
+    FROM upa_berth_facility
+    WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+    ORDER BY wharf_name, collected_at_utc DESC NULLS LAST
+),
+anch_pt AS (
+    -- POLYGON 은 경계 정점 여러 개, CIRCLE·BUNKER_RING 은 중심 1점 + 공시 반경.
+    -- TEXT 는 해도 글자 위치라 뺀다.
+    SELECT anchorage_name, latitude, longitude, radius_m
+    FROM upa_anchorage
+    WHERE anchorage_type IN ('POLYGON', 'CIRCLE', 'BUNKER_RING')
+      AND latitude IS NOT NULL AND longitude IS NOT NULL
+),
+anch_center AS (
+    SELECT anchorage_name, avg(latitude) AS lat, avg(longitude) AS lon
+    FROM anch_pt
+    GROUP BY anchorage_name
+),
+anch AS (
+    -- PostGIS 가 없어 다각형 내부 판정 대신 "중심 → 가장 먼 정점" 원으로 근사하고,
+    -- 원형은 공시 반경을 쓴다. 둘 다 +200m(묘박 선회 여유).
+    SELECT c.anchorage_name, c.lat, c.lon,
+           CASE WHEN max(p.radius_m) > 0 THEN max(p.radius_m)
+                ELSE max(mart.dist_m(c.lat, c.lon, p.latitude, p.longitude))
+           END + 200 AS radius_m
+    FROM anch_center c
+    JOIN anch_pt p USING (anchorage_name)
+    GROUP BY c.anchorage_name, c.lat, c.lon
+),
+vts_last AS (
+    -- 배마다 최신 VTS 이벤트 1행 — 신고 선석 이름표와 입항 시각
+    SELECT DISTINCT ON (upper(btrim(p.callsgn)))
+           upper(btrim(p.callsgn)) AS callsgn,
+           p.io_vts_name, p.facility_name, p.job_at_utc, p.arrival_at_utc,
+           fa.facility_type, fa.wharf_name
+    FROM upa_port_call p
+    LEFT JOIN mart.facility_alias fa ON fa.source_name = p.facility_name
+    WHERE upper(btrim(p.callsgn)) IN (SELECT callsgn FROM ident WHERE callsgn IS NOT NULL)
+    ORDER BY upper(btrim(p.callsgn)), p.job_at_utc DESC NULLS LAST, p.comm_count DESC NULLS LAST
+),
+located AS (
+    SELECT i.vessel_uid, i.callsgn, i.mmsi, i.vessel_name, i.latitude, i.longitude, i.sog,
+           i.nav_status_code, i.draught, i.received_at_utc,
+           vl.io_vts_name, vl.facility_name, vl.facility_type, vl.job_at_utc, vl.arrival_at_utc,
+           CASE WHEN vl.io_vts_name IN ('입항', '접안', '이선') AND vl.facility_type = 'BERTH'
+                THEN vl.wharf_name END                      AS declared_berth,
+           (vl.callsgn IS NOT NULL)                         AS has_vts_record,
+           COALESCE(i.sog <= 0.5, false)                    AS is_stopped
+    FROM ident i
+    LEFT JOIN vts_last vl ON vl.callsgn = i.callsgn
+),
+measured AS (
+    SELECT l.*,
+           mart.dist_m(l.latitude, l.longitude, db.latitude, db.longitude) AS declared_dist_m,
+           (l.declared_berth IS NOT NULL AND db.wharf_name IS NULL) AS declared_no_coord,
+           nb.wharf_name     AS nearest_berth,
+           nb.dist_m         AS nearest_dist_m,
+           na.anchorage_name AS nearest_anchorage,
+           na.dist_m         AS anchorage_dist_m,
+           na.radius_m       AS anchorage_radius_m
+    FROM located l
+    LEFT JOIN berth db ON db.wharf_name = l.declared_berth
+    LEFT JOIN LATERAL (
+        SELECT b.wharf_name, mart.dist_m(l.latitude, l.longitude, b.latitude, b.longitude) AS dist_m
+        FROM berth b
+        ORDER BY mart.dist_m(l.latitude, l.longitude, b.latitude, b.longitude), b.wharf_name
+        LIMIT 1
+    ) nb ON true
+    LEFT JOIN LATERAL (
+        -- 구역 반경 대비 가장 "안쪽"인 정박지
+        SELECT a.anchorage_name, a.radius_m, mart.dist_m(l.latitude, l.longitude, a.lat, a.lon) AS dist_m
+        FROM anch a
+        ORDER BY mart.dist_m(l.latitude, l.longitude, a.lat, a.lon) / a.radius_m
+        LIMIT 1
+    ) na ON true
+),
+judged AS (
+    SELECT m.*,
+           CASE
+               WHEN NOT (m.is_stopped AND m.has_vts_record)
+                    OR m.nav_status_code = '정박(앵커링)'   THEN NULL
+               WHEN m.declared_dist_m <= 1000               THEN '신고+위치'
+               WHEN m.nearest_dist_m <= 300                 THEN '위치'
+               WHEN m.declared_no_coord
+                    AND NOT COALESCE(m.anchorage_dist_m <= m.anchorage_radius_m, false)
+                                                            THEN '신고'
+           END AS berth_basis
+    FROM measured m
+)
+SELECT
+    j.vessel_uid,
+    j.callsgn,
+    j.mmsi,
+    j.vessel_name,
+    CASE
+        WHEN j.berth_basis IS NOT NULL                                  THEN 'BERTH'
+        WHEN (j.is_stopped OR j.nav_status_code = '정박(앵커링)')
+             AND j.anchorage_dist_m <= j.anchorage_radius_m             THEN 'ANCHORAGE'
+        WHEN j.is_stopped OR j.nav_status_code = '정박(앵커링)'          THEN 'STOPPED'
+        ELSE 'UNDERWAY'
+    END                                                   AS presence_zone,
+    CASE j.berth_basis
+        WHEN '위치' THEN j.nearest_berth
+        ELSE j.declared_berth
+    END                                                   AS berth_name,
+    j.berth_basis,
+    round(CASE j.berth_basis
+              WHEN '신고+위치' THEN j.declared_dist_m
+              WHEN '위치'      THEN j.nearest_dist_m
+          END)::int                                       AS berth_dist_m,
+    CASE WHEN j.berth_basis IS NULL
+              AND (j.is_stopped OR j.nav_status_code = '정박(앵커링)')
+              AND j.anchorage_dist_m <= j.anchorage_radius_m
+         THEN j.nearest_anchorage END                     AS anchorage_name,
+    j.latitude,
+    j.longitude,
+    j.sog,
+    j.nav_status_code,
+    j.draught,
+    j.received_at_utc,
+    -- 이름표로 쓴 VTS 최신 이벤트 (판정 근거를 화면·보고서가 그대로 보여줄 수 있게)
+    j.io_vts_name                                         AS vts_event,
+    j.facility_name                                       AS vts_facility_name,
+    j.facility_type                                       AS vts_facility_type,
+    j.job_at_utc                                          AS vts_event_at_utc,
+    j.arrival_at_utc                                      AS vts_arrival_at_utc,
+    (SELECT at FROM snap)                                 AS snapshot_at_utc,
+    round(EXTRACT(EPOCH FROM (now() - j.received_at_utc)) / 60.0)::int
+                                                          AS position_age_min,
+    -- [2026-09-22] 신선도 등급. position_age_min 만으론 화면이 임계값을 다시
+    -- 정해야 해서, 판정과 같은 곳에서 등급까지 매긴다. UPA 선박위치 수집 주기가
+    -- 10분이라 12분까지는 정상, 30분을 넘으면 한 번 이상 건너뛴 것이다.
+    --
+    -- ★ 이 뷰의 점유 판정 자체는 now() 가 아니라 최신 스냅샷(snap) 기준이다.
+    --   수집이 멈춰도 "마지막으로 본 상태"는 계속 보여주고, 그게 얼마나 낡았는지는
+    --   이 컬럼으로 밝힌다. now() 기준으로 판정하면 수집이 끊긴 순간 화면이
+    --   통째로 비어 관제사가 아무것도 못 본다.
+    CASE
+        WHEN j.received_at_utc > now() - interval '12 minutes' THEN 'OK'
+        WHEN j.received_at_utc > now() - interval '30 minutes' THEN 'DEGRADED'
+        WHEN j.received_at_utc > now() - interval '6 hours'    THEN 'STALE'
+        ELSE 'NO_SIGNAL'
+    END                                                   AS quality_flag
+FROM judged j;
 
 -- ---------------------------------------------------------------------------
 -- 3. mart.port_call_overview — 입항 통합 (입항건당 대표 1행)
@@ -939,17 +1198,25 @@ SELECT
     cm.is_synthetic,
     cm.cargo_basis
 FROM upa_cargo_manifest cm
+-- ★ [2026-09-22] UN 번호 조인 -> chem_id 직결.
+--
+--   UN 번호는 화학물질 식별자가 아니라 **운송 분류 코드**다. 한 UN 에 여러
+--   물질이 붙어 조인이 다대일로 팬아웃했다. 실측(2026-09-22):
+--       매니페스트 757행 -> UN 조인 시 890행 (+133)
+--       UN3082 -> 6종, UN1993 -> 4종(석유 포함), UN1986 -> 4종, UN3295 -> 4종
+--
+--   더 나쁜 건 그 뒤다. arrival_watcher._QUERY_PENDING_ARRIVALS 가
+--       SELECT cm.chem_id FROM mart.cargo_msds cm
+--       WHERE cm.callsgn = dc.callsgn AND cm.chem_id IS NOT NULL LIMIT 1
+--   로 하나를 집는데 ORDER BY 가 없다. UN1993 화물의 안전판정이 '석유'로 갈지
+--   '옥타메틸사이클로테트라실록산'으로 갈지가 우연이었다 — 둘은 인화점과 IMDG
+--   등급이 달라 판정 결과가 실제로 바뀐다.
+--
+--   chem_id 는 매니페스트 생성 시점에 못 박는다(gen_cargo_manifest.UN_TO_CHEM_ID).
+--   후보가 둘 이상이면 거기서 결정하고, 여기서는 1:1 로 붙이기만 한다.
+--   실측 매칭률 79.7% (603/757).
 LEFT JOIN mart.msds_flat ms
-  ON cm.dg_un_no IS NOT NULL
- -- UN 번호 정규화 후 조인.
- -- UN 번호는 국제 표준상 항상 4자리 숫자(0004~3548)라, 표기가 어떻게 오든
- -- 첫 4자리 숫자만 뽑으면 안전하게 정규화된다. 실무 표기 편차 실측:
- --   "1972" / "UN1972" / "un1972" / "UN 1972" / "UN-1972" / "(UN1972)"
- --   "1972.0" / "1972.00"  ← 숫자형으로 적재됐다가 문자열화된 잔재
- -- 이전 방식('^UN|\.0$' 치환)은 공백·괄호·하이픈·소수점 2자리를 놓쳤다.
- -- (숫자만 남기는 '[^0-9]' 방식은 "1972.0"을 "19720"으로 만들어 쓸 수 없다.)
- AND nullif((regexp_match(ms.dg_un_no::text, '([0-9]{4})'))[1], '')
-   = nullif((regexp_match(cm.dg_un_no::text, '([0-9]{4})'))[1], '');
+       ON ms.chem_id = nullif(btrim(cm.chem_id), '');
 
 -- ---------------------------------------------------------------------------
 -- 5. mart.weather_now — 환경 최신 (항상 정확히 1행)
@@ -1068,71 +1335,42 @@ WITH tide AS (
     SELECT tide_level_cm, observed_at_utc
     FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1
 ),
-berth AS (
-    -- -----------------------------------------------------------------------
-    -- 울산항 부두 제원 (해도기준면 수심 m)
+wharf_depth AS (
+    -- [2026-09-22] 수심 하드코딩(VALUES 35부두) -> wharf 테이블(65부두).
     --
-    -- 출처: 울산지방해양수산청 「울산항시설현황」 (본항 15부두·부이 2기 /
-    --       온산항 12부두·부이 3기 / 울산신항 6부두 — 총 35부두 67선석)
-    --       원본: data/seed/ulsan_berth_spec_seed.csv (선석수·안벽길이·DWT 포함)
+    -- 왜 바꾸나: 같은 값이 SQL 과 seed CSV 두 곳에 있어 정본이 갈렸고, 목록에
+    -- 없는 부두는 전부 UNKNOWN 이었다. wharf 는 울산항시설현황 웹 + API 대조로
+    -- 만든 정본이다(alembic 0021, data/seed/berth_seed.csv).
     --
-    -- ★ 안전측 최소값 원칙
-    --   같은 부두명에 선석별 수심이 다른 경우가 있다. 우리 데이터(upa_port_call)
-    --   는 부두명까지만 알고 몇 번 선석인지는 모르므로, 가장 얕은 수심을 쓴다.
-    --   깊은 쪽을 쓰면 실제로는 착저인 배를 OK 로 오판할 수 있다.
-    --     SK2부두 : 중력식 7.5m(1선석) + 잔교식 8m(4선석) → 7.5 적용
-    --     SK5부두 : 원문 '7-11' 범위(5선석)              → 7   적용
+    -- 대조 검증(2026-09-22): 하드코딩돼 있던 13개 부두의 최소수심이 wharf 값과
+    -- 전부 일치했다. 게다가 wharf 는 최대수심도 갖고 있어 berth_range 하드코딩
+    -- (SK5 11 · SK2 8)까지 같이 걷어낸다 — 실제로 wharf 는 그 둘에 더해
+    -- 용연·신항컨·2부두·4부두도 선석별 수심차가 있음을 알려준다.
     --
-    -- ★ 제외 대상
-    --   부이(SK부이II·III, S-Oil 부이, 석유공사부이 등 수심 27m)는 접안이 아니라
-    --   해상 계류라 안벽 UKC 개념이 다르다. 여기 목록에서 뺀다.
-    --   3부두는 원문 수심 표기가 '9,12' 로 모호해(9m/12m 인지 9.12m 인지) 제외.
-    --   → 목록에 없는 부두는 chart_depth_m NULL → draught_verdict 'UNKNOWN' 이 된다.
-    --     "모르는 것을 안전으로 간주하지 않는다"는 이 프로젝트 원칙과 같다.
-    -- -----------------------------------------------------------------------
-    SELECT * FROM (VALUES
-        -- 본항
-        ('4부두',        11.0), ('6부두',        12.0), ('용잠부두',      7.0),
-        ('가스부두',      7.5), ('UTT부두',      11.0),
-        ('SK1부두',       7.5), ('SK2부두',       7.5), ('SK3부두',      12.0),
-        ('SK4부두',      10.0), ('SK5부두',       7.0), ('SK6부두',      15.0),
-        ('SK7부두',      15.0), ('SK8부두',      18.0),
-        -- 온산항
-        ('효성부두',     12.0), ('달포부두',      7.0), ('UTK부두',      12.0),
-        ('대한유화부두', 12.0), ('OTK1부두',     11.0), ('OTK2부두',      9.0),
-        ('S-Oil 1부두',  11.0), ('S-Oil 2부두',  15.5), ('S-Oil 3부두',  14.0),
-        ('S-Oil 4부두',  12.0), ('정일1부두',    11.0), ('정일2부두',    12.5),
-        -- 울산신항
-        -- 이름은 mart.facility_alias.wharf_name(마스터 표기)과 정확히 같아야 한다.
-        -- 예전엔 '정일스톨트헤븐 신항 3~5부두'처럼 3개 선석을 한 줄로 묶어 적었는데
-        -- 마스터에는 3·4·5부두가 각각 별도 선석이라 하나도 붙지 않았다.
-        ('정일스톨트헤븐 울산신항3부두', 14.0),
-        ('정일스톨트헤븐 울산신항4부두', 14.0),
-        ('정일스톨트헤븐 울산신항5부두', 14.0),
-        ('현대오일터미널 신항1부두',     14.0),
-        ('현대오일터미널 신항2부두',     14.0),
-        ('LS MNM 신항부두',              14.0),
-        ('UTK 신항부두',                 14.0)
-    ) AS t(wharf_name, chart_depth_m)
+    -- 선석 번호는 여전히 모른다. vessel_presence 는 부두까지만 알려주므로
+    -- chart_depth_m 은 늘 부두 최소수심이다 — 안전측 최소값 원칙 그대로다.
+    --
+    -- 부이는 뺀다. 해상 계류라 안벽 UKC 개념이 다르다(수심 27m 로 들어와 있어
+    -- 그대로 두면 무조건 OK 가 된다).
+    SELECT w.wharf_name,
+           w.min_water_depth_m::double precision AS chart_depth_m,
+           w.max_water_depth_m::double precision AS depth_max_m
+    FROM wharf w
+    WHERE w.min_water_depth_m IS NOT NULL
+      AND strpos(w.wharf_name, '부이') = 0
 ),
 vessel AS (
+    -- 흘수 0 은 "0m"가 아니라 "선박이 보내지 않음"이다(dev 2026-09-21).
     SELECT DISTINCT ON (upper(btrim(callsgn)))
            upper(btrim(callsgn)) AS callsgn, draught, received_at_utc
     FROM upa_vessel_position
-    WHERE nullif(btrim(callsgn), '') IS NOT NULL AND draught IS NOT NULL
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL AND draught > 0
     ORDER BY upper(btrim(callsgn)), received_at_utc DESC
 ),
 pc AS (
-    -- 선석 배정은 UPA 운항관제(upa_port_call)에 있다. port_call_overview 는
-    -- PORT-MIS 신고를 기준행으로 삼으므로, 신고가 아직 없는 배(접안은 했으나
-    -- 신고 미연계)가 빠진다. 흘수 판정은 접안 사실만 있으면 해야 하므로
-    -- 여기서는 upa_port_call 을 직접 본다.
-    SELECT DISTINCT ON (upper(btrim(callsgn)))
-           upper(btrim(callsgn)) AS callsgn, facility_name, arrival_at_utc
-    FROM upa_port_call
-    WHERE nullif(btrim(callsgn), '') IS NOT NULL
-      AND departure_at_utc IS NULL          -- 아직 접안 중인 건만
-    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC
+    SELECT callsgn, berth_name AS facility_name, vts_arrival_at_utc AS arrival_at_utc
+    FROM mart.vessel_presence
+    WHERE presence_zone = 'BERTH' AND callsgn IS NOT NULL
 )
 SELECT
     pc.callsgn,
@@ -1147,6 +1385,12 @@ SELECT
     round((v.draught * 0.10)::numeric, 2)               AS ukc_required_m,
     CASE
         WHEN v.draught IS NULL OR b.chart_depth_m IS NULL THEN 'UNKNOWN'
+        WHEN b.depth_max_m IS NOT NULL
+             AND b.depth_max_m > b.chart_depth_m
+             AND (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                  - v.draught) < v.draught * 0.10
+             AND (b.depth_max_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
+                  - v.draught) >= v.draught * 0.10       THEN 'CHECK'
         WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0)
              <= v.draught                                THEN 'NOT_ALLOWED'
         WHEN (b.chart_depth_m + COALESCE((SELECT tide_level_cm FROM tide), 0) / 100.0
@@ -1155,27 +1399,22 @@ SELECT
     END                                                 AS draught_verdict,
     (SELECT observed_at_utc FROM tide)                  AS tide_observed_at_utc,
     v.received_at_utc                                   AS draught_observed_at_utc,
-    pc.arrival_at_utc
+    pc.arrival_at_utc,
+    COALESCE(b.depth_max_m, b.chart_depth_m)            AS chart_depth_max_m
 FROM pc
--- ★ 선석 이름은 반드시 mart.facility_alias 를 거친다.
---   pc.facility_name 은 VTS 원문('S-OIL1부두'·'SK1부두 11'·'OTK부두')이고 위 수심표는
---   마스터 표기('S-Oil 1부두'·'SK1부두'·'OTK1부두')다. 예전에는 이 둘을 문자열
---   완전일치로 붙여서 액체화물 전용부두가 통째로 안 맞았다.
---   실측(2026-08-15): 판정 414건 중 UNKNOWN 387건 = 93.5%.
---   0-B절이 바로 이 문제 때문에 facility_alias 를 만들었는데 이 뷰만 안 거치고 있었다.
---
---   더 나쁜 점은 조용했다는 것이다 — safety_index 의 '흘수 여유' 축이 UNKNOWN 을
---   분모에서 빼기 때문에, 27건만 보고 98점을 내며 93.5%를 못 본 사실이 화면에
---   드러나지 않았다.
---
--- ★ LEFT JOIN 이어야 한다. INNER JOIN 이면 위 berth 목록에 없는 부두(제원 미확보,
---   부이, 신규 부두)에 접안한 선박이 판정 결과에서 통째로 사라진다. 그러면
---   "위험하지 않다"가 아니라 "아예 안 보인다"가 되어 UNIDENTIFIED·NO_SIGNAL 을
---   살려둔 이 프로젝트 원칙과 정면으로 어긋난다.
---   목록에 없으면 chart_depth_m 이 NULL 이 되고 draught_verdict 는 'UNKNOWN' 이다.
 LEFT JOIN mart.facility_alias fa
        ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
-LEFT JOIN berth  b ON b.wharf_name = fa.wharf_name
+-- ★ 마스터 표기로 먼저 직접 붙이고, 안 되면 facility_alias 를 거친다.
+--   vessel_presence 는 이미 마스터 표기(berth_name)를 준다. 그런데
+--   facility_alias 에 그 이름이 source_name 으로 늘 있지는 않다 — 실측
+--   (2026-09-22): 접안 8개 부두 중 '4부두'·'신항북방파제 T/S부두' 두 곳은
+--   source_name 에 '4부두 01'·'4부두 02' 같은 선석 표기만 있고 부두명 자체가
+--   없어 조인이 끊겼다. 그 결과 wharf 에 수심이 있는데도 UNKNOWN 이 됐다.
+--   COALESCE 순서를 '직접 -> 별칭'으로 두면 둘 다 붙는다.
+LEFT JOIN wharf_depth b ON b.wharf_name = COALESCE(
+    (SELECT w2.wharf_name FROM wharf_depth w2 WHERE w2.wharf_name = pc.facility_name),
+    fa.wharf_name
+)
 LEFT JOIN vessel v ON v.callsgn = pc.callsgn;
 
 -- ---------------------------------------------------------------------------
@@ -1387,10 +1626,13 @@ FROM upa_vessel_position;
 --    un_no 는 msds_chemical 의 표시용 컬럼이고 WHERE 절에 등장하지 않는다.
 --    화물 manifest 에는 UN 번호만 있으므로, UN → chem_id 변환이 이 뷰의 핵심이다.)
 --
--- ★ "지금"의 정의
---   upa_port_call 에 입항 기록이 있고 departure_at_utc 가 NULL 인 선박 = 재항 중.
---   출항 신고가 확정된 배의 화물은 그 선석에 없으므로 제외한다.
---   (vessel_latest_position 의 presence_state 와 같은 원칙 — 출항은 서류로 확정)
+-- ★ "지금"의 정의 (2026-09-17 개정)
+--   mart.vessel_presence(2-1)에서 presence_zone='BERTH' 인 배 = 지금 선석에 있는 배.
+--   예전엔 "upa_port_call 에 입항 기록이 있고 departure_at_utc 가 NULL"이었는데,
+--   출항 처리가 빠진 유령 기록(7일 넘은 건이 대부분)과 정박지 대기 배까지 들어가
+--   옆 선석 혼재 판정이 있지도 않은 배의 화물로 이뤄졌다.
+--   facility_name 은 그 배가 실제로 붙어 있는 선석(마스터 표기)이다. 합성 manifest
+--   의 facility_name 은 생성 당시 가정한 선석이라 위치 판정 선석을 우선한다.
 --
 -- ★ 한계 (숨기지 않는다)
 --   - is_synthetic=true 인 화물이 섞여 있다. bzentyCd(업체코드) 미확보로 UPA
@@ -1402,18 +1644,15 @@ FROM upa_vessel_position;
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE VIEW mart.berth_current_cargo AS
 WITH in_port AS (
-    -- 재항 중인 선박 (출항 신고 없음) — 선박당 최신 입항 건 1개
-    SELECT DISTINCT ON (upper(btrim(callsgn)))
-           upper(btrim(callsgn)) AS callsgn,
-           facility_name,
-           arrival_at_utc
-    FROM upa_port_call
-    WHERE nullif(btrim(callsgn), '') IS NOT NULL
-      AND departure_at_utc IS NULL
-    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC
+    -- 지금 선석에 있는 배 (UPA 위치 판정, 선박당 1행)
+    SELECT callsgn,
+           berth_name          AS facility_name,
+           vts_arrival_at_utc  AS arrival_at_utc
+    FROM mart.vessel_presence
+    WHERE presence_zone = 'BERTH' AND callsgn IS NOT NULL
 )
 SELECT DISTINCT
-       COALESCE(cm.facility_name, ip.facility_name) AS facility_name,
+       ip.facility_name,
        ip.callsgn,
        cm.chem_id,
        cm.cas_no,
@@ -1523,3 +1762,659 @@ SELECT bf.record_uid,
            END
        ) IS DISTINCT FROM bf.handling_cargo_name    AS is_corrected
 FROM upa_berth_facility bf;
+
+
+-- ===========================================================================
+-- 7. 감사·승인 뷰 (2026-09-22 통합)
+--
+-- 아래 뷰들은 별도 파일(berth_audit_views.sql · anchorage_audit_views.sql ·
+-- approval_candidates.sql · arrival_views_v2.sql)로 따로 관리하다가 여기로
+-- 합쳤다. 따로 두면 이 파일이 DROP 하는 원본(facility_alias ·
+-- vessel_latest_position · cargo_msds)에 매달린 채 남아, 다음 적용 때
+-- "other objects depend on it" 으로 막힌다 — 실제로 막혔다(2026-09-22).
+-- 삭제는 위 DROP 구역 맨 앞에 함께 있다.
+--
+-- ★ mart.berth_occupancy_live 는 여기 없다.
+--   같은 질문("지금 어느 배가 어느 선석에 붙어 있나")에 2-1 의 mart.vessel_presence
+--   와 둘이 서로 다른 답을 냈다. 실측(2026-09-22, 같은 스냅샷):
+--       vessel_presence      접안 14척 (위치 10 · 신고+위치 4)
+--       berth_occupancy_live 접안  0척
+--   berth_occupancy_live 는 now() 기준 30분 안의 위치만 '접안'으로 봤는데, 그때
+--   최신 위치가 6시간 33분 전이라 전부 NO_SIGNAL 로 떨어졌다. 수집이 잠깐만
+--   밀려도 화면이 통째로 빈다. vessel_presence 는 최신 스냅샷 기준으로 판정하고
+--   낡은 정도를 quality_flag·position_age_min 으로 따로 밝힌다 — 그쪽이 맞다.
+-- ===========================================================================
+
+-- --- 7-1. mart.arrival_schedule (PORT-MIS 입항 예정) ---
+-- ===========================================================================
+-- 입출항 현황 재작성 — upa_port_call 배제 (2026-09-20)
+--
+-- 설계 근거: docs/11_선석제원_재설계_설계문서.md §21
+--
+-- ---------------------------------------------------------------------------
+-- 왜 고치는가
+--
+--   `mart.port_call_overview` 는 portmis_vessel(신고)과 upa_port_call(관제 이력)을
+--   FULL JOIN 해 왔다. upa_port_call 은 **사후 기록**이라 관제 화면의 '현재'를
+--   만드는 데 쓰면 안 된다 — 출항 기록이 늦으면 이미 나간 배가 남고, 접안 시각도
+--   실제가 아니라 사후 정리된 값이다.
+--
+--   역할 분리(§21):
+--     portmis_vessel       입항 예정 · 배정 선석   (계획)
+--     upa_vessel_position  실시간 위치            (현재)
+--     upa_port_call        사후 이력              (배제)
+--
+--   그래서 이 뷰는 **신고 기준 입출항 현황**만 담는다. 실제 접안 여부는
+--   mart.berth_occupancy_live(실시간)가, 현재 위치는 mart.vessel_latest_position
+--   이 답한다.
+--
+-- ---------------------------------------------------------------------------
+-- 이름
+--
+--   내용이 '항차 이력(port call)'이 아니라 '입출항 신고 현황'이 되므로
+--   `mart.arrival_schedule` 로 바꾼다. `port_call_overview` 는 같은 내용을 보는
+--   **호환 뷰**로 남긴다 — dashboard_current 와 프론트엔드가 그 이름으로 읽고
+--   있어, 이름만 바꾸면 화면이 깨진다. 소비처를 옮긴 뒤 지우면 된다.
+--
+--   호환 뷰에는 port_call_id · io_vts_name 이 남는다. 둘 다 upa_port_call 에서
+--   오던 값이라 이제 NULL 이다. 컬럼을 없애지 않는 이유는 소비처가 SELECT 로
+--   지목하고 있어 빠지면 쿼리가 깨지기 때문이다.
+-- ===========================================================================
+CREATE VIEW mart.arrival_schedule AS
+WITH pm_latest AS (
+    -- 같은 항차가 신고 차수(최초/변경/최종)마다 반복된다. 선박당 최신 1건.
+    SELECT DISTINCT ON (upper(btrim(callsgn)))
+           upper(btrim(callsgn)) AS callsgn,
+           entry_year, entry_count, entry_purpose_nm,
+           origin_port_nm, prev_port_nm, next_port_nm, dest_port_nm,
+           is_domestic_voyage, port_agency_label,
+           arrival_at_utc, departure_at_utc, arrival_report_type,
+           arrival_facility_cd, arrival_facility_sub_code, arrival_facility_nm
+    FROM portmis_vessel
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+    ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC NULLS LAST
+),
+cargo_sum AS (
+    SELECT upper(btrim(callsgn)) AS callsgn,
+           count(*)                                        AS cargo_item_count,
+           count(DISTINCT bl_no)                           AS bl_count,
+           count(*) FILTER (WHERE dg_un_no IS NOT NULL)     AS dg_cargo_count,
+           array_agg(DISTINCT dg_un_no) FILTER (WHERE dg_un_no IS NOT NULL) AS dg_un_nos,
+           array_agg(DISTINCT cargo_name_raw) FILTER (WHERE cargo_name_raw IS NOT NULL) AS cargo_names
+    FROM upa_cargo_manifest
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL
+    GROUP BY upper(btrim(callsgn))
+)
+SELECT
+    pm.callsgn, pm.entry_year, pm.entry_count, pm.entry_purpose_nm,
+    pm.origin_port_nm, pm.prev_port_nm, pm.next_port_nm, pm.dest_port_nm,
+    pm.is_domestic_voyage, pm.port_agency_label,
+    pm.arrival_at_utc, pm.departure_at_utc,
+    -- 신고 확정도. '최종'이 아니면 arrival_at_utc 는 예정 시각이다.
+    pm.arrival_report_type,
+    -- 배정 선석: 매핑이 있으면 우리 표기, 없으면 PORT-MIS 원문.
+    COALESCE(m.berth_id, m.wharf_name, pm.arrival_facility_nm)::text AS facility_name,
+    m.wharf_name AS assigned_wharf_name,
+    m.berth_id   AS assigned_berth_id,
+    cs.cargo_item_count, cs.bl_count, cs.dg_cargo_count, cs.dg_un_nos, cs.cargo_names
+FROM pm_latest pm
+LEFT JOIN portmis_facility_map m
+       ON m.facility_cd       = pm.arrival_facility_cd
+      AND m.facility_sub_code = pm.arrival_facility_sub_code
+LEFT JOIN cargo_sum cs ON cs.callsgn = pm.callsgn;
+
+-- ---------------------------------------------------------------------------
+-- 2. mart.port_call_overview — 호환 뷰 (소비처 이전 전까지 유지)
+--
+-- port_call_id · io_vts_name 은 upa_port_call 에서 오던 값이라 NULL 이다.
+-- 컬럼 자체를 없애면 소비처 SELECT 가 깨지므로 자리만 남긴다.
+-- ---------------------------------------------------------------------------
+COMMENT ON VIEW mart.arrival_schedule IS
+    '입출항 신고 현황(PORT-MIS). 배정 선석은 portmis_facility_map 경유. 실제 접안은 mart.berth_occupancy_live 참조';
+
+-- --- 7-2. mart.berth_occupancy · berth_audit · berth_facility_traffic ---
+-- ===========================================================================
+-- 선석 제원 감사 뷰 — PORT-MIS 배정 × 선석/부두 제원 × 선박 제원
+--
+-- 설계 근거: docs/11_선석제원_재설계_설계문서.md
+-- 선행 조건: alembic upgrade head (0021 wharf/berth · 0022 portmis_facility_map)
+--            + berth_seed_loader 적재
+--
+-- 이 파일은 mart_views.sql 과 **별도**다. 기존 뷰를 하나도 건드리지 않는다.
+--
+-- ---------------------------------------------------------------------------
+-- 이 뷰들이 서 있는 전제
+--
+--   우리는 선석을 배정하지 않는다. PORT-MIS 가 이미 내린 배정을 받아서
+--   **검증**한다. 그래서 하는 일은 후보를 고르는 것이 아니라, 남이 내린 결정에
+--   물리적 모순이 없는지 보는 것이다.
+--
+--   ★ 조인은 portmis_facility_map 을 거친다
+--     PORT-MIS 코드(MBU/01)와 UPA 부두현황 코드(MDU/02)는 3글자 접두 공간을
+--     공유하지만 **배정이 다른 별개 레지스트리**다. 직접 조인하면 대부분
+--     빗나가고 일부는 우연히 맞아 더 나쁘다. 그래서 PORT-MIS 원본에서 수집한
+--     매핑표를 경유한다(§3).
+--
+--   ★ 붙지 않는 시설도 표에 남는다
+--     portmis_facility_map 은 PORT-MIS 가 쓰는 계선시설을 **전부** 담는다
+--     (정박지 제외). 못 붙인 것을 목록에서 지우면 감사에서 조용히 사라지기
+--     때문이다. spec_basis 로 다섯 가지를 구분한다:
+--
+--   ★ 길이 게이트는 계류 방식을 본다
+--     돌핀 계류는 선박이 구조물보다 긴 것이 정상이라(UTT부두: 안벽 80m 에
+--     179m 선박) 안벽길이로 판정하면 전부 오탐이 된다. quay_structure 가
+--     돌핀 계열이면 length_verdict='NOT_APPLICABLE' 로 둔다. 현재 118선석 중
+--     30선석(돌핀 19 + 강관돌핀 11)이 해당한다.
+--
+--       BERTH            선석까지 특정 — 정확 판정
+--       WHARF_WORST_CASE 부두까지만 — 최악값으로 보수 판정
+--       KNOWN_GAP        제원 자료가 없음이 **확인됨**(gap_reason 참고). 조치 불가
+--       UNMAPPED         아직 안 붙임 — **작업 대기열**. 0 이어야 정상
+--       ANCHORAGE        정박지 — 안벽 제원으로 판정할 대상이 아님
+--                        (upa_anchorage 와 대조해 가린다. 접두어 추측 금지)
+--
+--     KNOWN_GAP 과 UNMAPPED 를 섞으면 대기열이 줄지 않는다. 실측 예:
+--     장생포호안은 입항 배정이 124건으로 안벽 시설 중 2위인데 세 출처
+--     어디에도 제원이 없다 — 이건 고칠 수 없는 KNOWN_GAP 이다.
+--
+--   ★ 판정 입도가 배정마다 다르다
+--     PORT-MIS 는 '자동차부두 02' 처럼 선석까지 특정하기도 하고 'SK3부두'
+--     처럼 부두로만 등록되기도 한다. 그래서:
+--
+--       map.berth_id 있음 → 그 선석 제원으로 **정확 판정**
+--       map.berth_id 없음 → 그 부두의 **최악값(MIN)**으로 보수 판정
+--
+--     어느 쪽으로 판정했는지는 spec_basis 컬럼에 남긴다. 소비처가 경고의
+--     성격(확정 / 과잉 가능)을 구분할 수 있어야 하기 때문이다.
+--
+--   ★ 접안능력(DWT) 게이트는 넣지 않았다
+--     berth.capacity_value 는 재화중량(DWT)이고 portmis_vessel.gross_tonnage 는
+--     용적 기반 총톤수(GT)다. 차원이 다르고 환산 계수는 선종·화물에 따라 크게
+--     달라 안전 판정 근거로 쓸 수 없다. 표시용으로만 내보낸다(capacity_note).
+-- ===========================================================================
+-- ---------------------------------------------------------------------------
+-- 1. mart.berth_occupancy — PORT-MIS 배정을 점유 구간으로 본 뷰
+--
+-- 테이블이 아니라 뷰다. 배정을 우리가 만들지 않으므로, 별도 테이블로 복사하면
+-- 같은 사실의 두 번째 사본이 생기고 원본과 어긋날 때 어느 쪽이 맞는지 답할 수
+-- 없다.
+--
+-- ★ 입항 시설과 출항 시설이 다른 경우(shifting)
+--   중간에 이안·재접안이 있었다는 뜻이다. 한 구간으로 뭉개면 안 되지만
+--   전환 시점은 알 수 없다. 그래서 두 행으로 나누되 경계를 NULL 로 두고
+--   is_shifted 로 표시한다 — 없는 정밀도를 지어내지 않는다.
+-- ---------------------------------------------------------------------------
+CREATE VIEW mart.berth_occupancy AS
+WITH base AS (
+    SELECT
+        callsgn, vessel_name, entry_year, entry_count, gross_tonnage,
+        arrival_facility_cd, arrival_facility_sub_code, arrival_facility_nm,
+        departure_facility_cd, departure_facility_sub_code,
+        arrival_at_utc, departure_at_utc,
+        (departure_facility_cd IS NOT NULL
+         AND arrival_facility_cd IS NOT NULL
+         AND (departure_facility_cd, departure_facility_sub_code)
+             IS DISTINCT FROM (arrival_facility_cd, arrival_facility_sub_code)
+        ) AS is_shifted
+    FROM portmis_vessel
+    WHERE arrival_facility_cd IS NOT NULL
+)
+SELECT
+    callsgn, vessel_name, entry_year, entry_count, gross_tonnage,
+    'ARRIVAL'::text            AS leg,
+    arrival_facility_cd        AS facility_cd,
+    arrival_facility_sub_code  AS facility_sub_code,
+    arrival_facility_nm        AS facility_name_reported,
+    arrival_at_utc             AS occupied_from_utc,
+    -- 이동이 있었으면 이 구간이 언제 끝났는지 모른다. NULL 이 정직하다.
+    CASE WHEN is_shifted THEN NULL ELSE departure_at_utc END AS occupied_to_utc,
+    is_shifted
+FROM base
+UNION ALL
+SELECT
+    callsgn, vessel_name, entry_year, entry_count, gross_tonnage,
+    'DEPARTURE'::text, departure_facility_cd, departure_facility_sub_code,
+    NULL, NULL, departure_at_utc, TRUE
+FROM base
+WHERE is_shifted;
+
+
+-- ---------------------------------------------------------------------------
+-- 2. mart.berth_audit — 길이·수심 게이트
+--
+-- 판정 어휘는 기존 mart.berth_draught_check 와 맞춘다(OK / MARGINAL /
+-- NOT_ALLOWED / UNKNOWN). 다만 이쪽은 upa_port_call 이 아니라 portmis_vessel 을
+-- 근거로 삼는다 — 관제 데이터의 실시간성 문제로 port_call 을 배제했다.
+--
+-- UKC(Under Keel Clearance)는 통상 관행값인 흘수의 10% 를 기본으로 둔다.
+-- 법정 수치가 아니며 터미널·항만별로 다르다 — 울산항 각 터미널 운영규정을
+-- 입수해 확정해야 한다(미확보, 한계로 보고).
+-- ---------------------------------------------------------------------------
+CREATE VIEW mart.berth_audit AS
+WITH tide AS (
+    -- 가용수심 = 해도기준면 수심 + 조위. 조위를 빼먹으면 만조에만 접안 가능한
+    -- 배를 영구 불가로 오판한다.
+    SELECT tide_level_cm FROM tide_obs ORDER BY observed_at_utc DESC LIMIT 1
+),
+occ AS (
+    SELECT * FROM mart.berth_occupancy WHERE leg = 'ARRIVAL'
+),
+joined AS (
+    SELECT
+        o.*,
+        m.wharf_name, m.berth_id, m.match_level, m.confidence,
+        w.port_name, w.berth_count, w.spec_spread_flag,
+        -- 선석이 특정되면 그 선석 값, 아니면 부두 최악값. COALESCE 순서가
+        -- 곧 판정 정책이다(§6).
+        -- ★ 수심은 선석 값을 쓰되, 그 부두가 '웹이 얕은 선석을 누락'으로 확인된
+        --   경우(w.depth_floored)에는 **부두 최저수심**을 쓴다.
+        --   어느 선석이 얕은지 알 수 없으므로 선석 단위 정밀도를 포기하고
+        --   보수적으로 판정한다. 실측: 2부두는 웹이 3선석 모두 12m 라 적지만
+        --   해수청 원본은 9~12m 다 — 12m 로 판정하면 착저 위험을 놓친다.
+        CASE
+            WHEN COALESCE(w.depth_floored, FALSE)
+                THEN LEAST(COALESCE(b.water_depth_m, w.min_water_depth_m),
+                           w.min_water_depth_m)
+            ELSE COALESCE(b.water_depth_m, w.min_water_depth_m)
+        END AS spec_depth_m,
+        COALESCE(w.depth_floored, FALSE) AS depth_is_wharf_floor,
+        COALESCE(b.length_m,       w.min_length_m)      AS spec_length_m,
+        -- 선석 길이가 미상일 때의 상한. 웹이 부두 총연장을 선석마다 복사해 싣는
+        -- 경우가 많아(일반부두: 7개 선석 모두 '679m') 선석 길이를 확정할 수 없는
+        -- 부두가 상당수다. 그래도 'LOA > 부두 총연장'이면 확실히 불가라,
+        -- 판정을 통째로 포기하지 않고 이 한 가지는 잡아낸다.
+        w.total_quay_length_m,
+        b.quay_structure,
+        COALESCE(b.capacity_value, w.min_capacity_dwt)  AS spec_min_dwt,
+        w.max_capacity_dwt,
+        -- 판정이 무엇에 근거했는지. UNKNOWN 이 나왔을 때 **왜** 모르는지가
+        -- 구분돼야 한다 — 고칠 수 있는 것과 자료가 없는 것은 다르다.
+        CASE
+            WHEN b.berth_id IS NOT NULL            THEN 'BERTH'
+            WHEN m.wharf_name IS NOT NULL          THEN 'WHARF_WORST_CASE'
+            WHEN m.match_level = 'KNOWN_GAP'       THEN 'KNOWN_GAP'
+            WHEN m.match_level = 'UNMAPPED'        THEN 'UNMAPPED'
+            WHEN a.facility_code IS NOT NULL       THEN 'ANCHORAGE'
+            ELSE 'NOT_IN_REGISTRY'
+        END AS spec_basis,
+        m.gap_reason,
+        vs.loa_m, vs.draught_m,
+        (SELECT tide_level_cm FROM tide) / 100.0 AS tide_m
+    FROM occ o
+    -- 매핑에 없는 시설은 안 붙고 아래에서 UNKNOWN 이 된다
+    -- ("모르는 것을 안전으로 간주하지 않는다"). 정박지·호안이 여기 해당하고,
+    -- UPA 웹 부두현황에 없는 부두(북신항 액체·에너지부두 등)도 마찬가지다.
+    LEFT JOIN portmis_facility_map m
+           ON m.facility_cd       = o.facility_cd
+          AND m.facility_sub_code = o.facility_sub_code
+    LEFT JOIN wharf w ON w.wharf_name = m.wharf_name
+    LEFT JOIN berth b ON b.berth_id   = m.berth_id
+    LEFT JOIN vessel_spec vs
+           ON upper(btrim(vs.callsgn)) = upper(btrim(o.callsgn))
+    -- 정박지 판별은 **추측하지 않고 정박지 레지스트리와 대조한다.**
+    -- 코드 접두어로 가르면 틀린다 — MQP-01 은 '미포부두 01' 로 정박지가 아니라
+    -- 안벽이고, MQ* 를 통째로 정박지 취급하면 그 배정이 조용히 빠진다.
+    -- upa_anchorage.facility_code 는 'WAE-02' 결합형이다.
+    LEFT JOIN (SELECT DISTINCT facility_code FROM upa_anchorage) a
+           ON a.facility_code = o.facility_cd || '-' || lpad(o.facility_sub_code, 2, '0')
+)
+SELECT
+    callsgn, vessel_name, entry_year, entry_count,
+    facility_cd, facility_sub_code, facility_name_reported,
+    wharf_name, berth_id, port_name,
+    occupied_from_utc, occupied_to_utc, is_shifted,
+    spec_basis, match_level, confidence, gap_reason,
+    loa_m, spec_length_m,
+    draught_m, spec_depth_m, depth_is_wharf_floor, tide_m,
+    round((spec_depth_m + COALESCE(tide_m, 0))::numeric, 2) AS available_depth_m,
+
+    -- 길이 게이트 — LOA 와 안벽길이 모두 m 라 직접 비교된다.
+    --
+    -- 선석 길이가 확정된 경우에만 정상 판정한다. 미상일 때는 부두 총연장으로
+    -- **상한만** 본다: LOA 가 총연장보다 길면 어느 선석에도 못 붙으므로
+    -- NOT_ALLOWED 가 확실하다. 그 외에는 UNKNOWN 이다 — 총연장 안에 든다고
+    -- 해서 개별 선석에 든다는 보장은 없으므로 OK 라고 말하지 않는다.
+    CASE
+        WHEN loa_m IS NULL                          THEN 'UNKNOWN'
+        -- ★ 돌핀 계류에는 길이 게이트를 적용하지 않는다.
+        --   돌핀(dolphin)은 이격된 계선주에 배를 매는 방식이라 **선박이 구조물보다
+        --   긴 것이 정상**이다. UTT부두는 안벽 80m 인데 179m 선박이 정상 접안한다.
+        --   안벽식 기준을 그대로 대면 전부 NOT_ALLOWED 로 뜬다(실측 오탐).
+        --   실제 제약은 돌핀 간격·계류색 배치라 안벽길이로는 판정할 수 없다.
+        WHEN quay_structure LIKE '%돌핀%'            THEN 'NOT_APPLICABLE'
+        WHEN spec_length_m IS NOT NULL THEN
+            CASE
+                WHEN loa_m > spec_length_m       THEN 'NOT_ALLOWED'
+                WHEN loa_m > spec_length_m * 0.9 THEN 'MARGINAL'
+                ELSE 'OK'
+            END
+        WHEN total_quay_length_m IS NOT NULL
+             AND loa_m > total_quay_length_m        THEN 'NOT_ALLOWED'
+        ELSE 'UNKNOWN'
+    END AS length_verdict,
+
+    -- 길이 판정이 무엇에 근거했는지. 소비처가 UNKNOWN 의 이유를 알아야 한다.
+    CASE
+        WHEN quay_structure LIKE '%돌핀%'      THEN 'DOLPHIN_MOORING'
+        WHEN spec_length_m IS NOT NULL       THEN 'BERTH_LENGTH'
+        WHEN total_quay_length_m IS NOT NULL THEN 'WHARF_TOTAL_UPPER_BOUND'
+        ELSE 'NONE'
+    END AS length_basis,
+    quay_structure,
+
+    -- 수심 게이트 — 가용수심(수심+조위) 대비 흘수 + UKC 10%
+    CASE
+        WHEN draught_m IS NULL OR spec_depth_m IS NULL             THEN 'UNKNOWN'
+        WHEN spec_depth_m + COALESCE(tide_m, 0) <= draught_m       THEN 'NOT_ALLOWED'
+        WHEN spec_depth_m + COALESCE(tide_m, 0) <  draught_m * 1.1 THEN 'MARGINAL'
+        ELSE 'OK'
+    END AS draught_verdict,
+
+    -- 접안능력은 판정하지 않는다(DWT-GT 차원 불일치). 근거만 내보낸다.
+    format('접안능력 %s~%s DWT / 선박 GT %s (DWT-GT 직접비교 불가)',
+           spec_min_dwt, max_capacity_dwt, gross_tonnage) AS capacity_note,
+
+    -- 부두 최악값으로 판정했고 그 부두의 선석 제원이 서로 다르면, 실제 배정
+    -- 선석에 따라 판정이 달라질 수 있다(과잉 경고 가능). 소비처가 경고의
+    -- 성격을 구분할 수 있도록 표시한다.
+    (spec_basis = 'WHARF_WORST_CASE' AND COALESCE(spec_spread_flag, FALSE)) AS verdict_may_be_pessimistic
+FROM joined;
+COMMENT ON VIEW mart.berth_occupancy IS
+    'PORT-MIS 배정을 점유 구간으로 본 뷰. 테이블로 복사하지 않는다 — 배정의 정본은 portmis_vessel이다';
+COMMENT ON VIEW mart.berth_audit IS
+    'PORT-MIS 배정의 길이·수심 타당성 감사. 선석이 특정되면 정확 판정, 아니면 부두 최악값으로 보수 판정(spec_basis 참고)';
+
+
+-- ---------------------------------------------------------------------------
+-- 3. mart.berth_facility_traffic — 계선시설별 배정 건수와 감사 가능 여부
+--
+-- **뷰다. 매핑표에 배정 건수를 저장하지 않는다.**
+--   그건 portmis_vessel 에서 파생되는 통계지 매핑 사실이 아니고, 수집이
+--   진행될수록 저장해 둔 값은 낡는다. portmis_facility_map 은 정적 시드이므로
+--   휘발성 수치를 담으면 안 된다 — 같은 이유로 berth_assignment 도 테이블이
+--   아니라 뷰로 두었다(§11).
+--
+-- 용도: 제원 공백의 **우선순위**. 배정이 없는 시설은 제원이 비어 있어도 감사에
+-- 아무 영향이 없다. 이 뷰를 arrival_count 내림차순으로 보면 무엇부터 손볼지
+-- 바로 나온다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE VIEW mart.berth_facility_traffic AS
+SELECT
+    p.arrival_facility_cd                       AS facility_cd,
+    p.arrival_facility_sub_code                 AS facility_sub_code,
+    max(p.arrival_facility_nm)                  AS facility_nm,
+    count(*)                                    AS arrival_count,
+    m.wharf_name, m.berth_id,
+    COALESCE(m.match_level,
+             CASE WHEN a.facility_code IS NOT NULL THEN 'ANCHORAGE'
+                  ELSE 'NOT_IN_REGISTRY' END)   AS match_level,
+    m.gap_reason,
+    -- 정박지는 안벽 제원이 아니라 **톤급 제한**으로 판정해야 한다
+    -- (upa_anchorage.remark: '3만톤 이하' · '2천톤급이하' 등). 아직 판정 뷰는
+    -- 없고 근거만 노출한다 — §18 참고.
+    a.remark                                    AS anchorage_limit_raw
+FROM portmis_vessel p
+LEFT JOIN portmis_facility_map m
+       ON m.facility_cd       = p.arrival_facility_cd
+      AND m.facility_sub_code = p.arrival_facility_sub_code
+LEFT JOIN (SELECT facility_code, min(remark) AS remark
+           FROM upa_anchorage GROUP BY facility_code) a
+       ON a.facility_code = p.arrival_facility_cd || '-'
+                            || lpad(p.arrival_facility_sub_code, 2, '0')
+WHERE p.arrival_facility_cd IS NOT NULL
+GROUP BY p.arrival_facility_cd, p.arrival_facility_sub_code,
+         m.wharf_name, m.berth_id, m.match_level, m.gap_reason, a.facility_code, a.remark;
+
+COMMENT ON VIEW mart.berth_facility_traffic IS
+    '계선시설별 입항 배정 건수 + 감사 가능 여부. 제원 공백의 우선순위를 정하는 용도. 건수는 저장하지 않고 매번 센다';
+
+-- --- 7-3. mart.anchorage_limit · anchorage_audit ---
+-- ===========================================================================
+-- 정박지 감사 뷰 — PORT-MIS 정박지 배정 × 톤급 제한
+--
+-- 설계 근거: docs/11_선석제원_재설계_설계문서.md §18
+-- 선행 조건: upa_anchorage 적재(기존 파이프라인) + portmis_vessel
+--
+-- berth_audit_views.sql 과 **별도 파일**이다. 안벽 감사와 판정 축이 다르다 —
+-- 안벽은 길이·수심(m), 정박지는 톤급이다.
+--
+-- ---------------------------------------------------------------------------
+-- 왜 필요한가
+--
+--   PORT-MIS 배정의 절반가량이 정박지다(실측: 고유 입항 698건 중 336건).
+--   지금까지 이쪽은 판정 없이 지나가고 있었다 — 감사 대상의 절반이 비어 있었다.
+--
+--   다행히 정박지는 안벽보다 판정이 단순하다. `upa_anchorage.remark` 에
+--   톤급 제한이 있고, PORT-MIS 가 주는 `gross_tonnage` 와 **같은 톤 축**이다.
+--   (안벽의 접안능력 DWT 와 선박 GT 는 차원이 달라 환산이 불가능했다.)
+--
+-- ---------------------------------------------------------------------------
+-- ★ 단위 = 총톤수(G/T) — 법령 별표로 확인됨 (2026-09-20)
+--
+--   `remark` 원문에는 단위가 없지만, 정박지 지정의 근거 법령 별표가 컬럼명을
+--   명시한다:
+--       '[별표 1] 주요항만시설 … 정 박 지 … **정박능력(G/T)**'
+--       '[별표 1] 정박지 ① 작업 및 대기 … **제한톤수(G/T), 척**'
+--   코드 체계도 같다(별표의 'WAJ-02' ↔ upa_anchorage 의 'WAE-02').
+--   따라서 portmis_vessel.gross_tonnage 와 **같은 축**이며 직접 비교된다.
+--
+--   ※ 다만 법령 별표에는 UPA remark 에 없는 부가 제한이 있다 —
+--     '단, 길이 200m이하이고, 만재흘수 7.2m이하' 같은 LOA·흘수 조건.
+--     즉 이 뷰의 톤급 판정은 **법령 제한의 일부만** 본다. 울산항 별표는
+--     스캔 이미지라 텍스트 추출이 안 돼 아직 반영하지 못했다(OCR 필요).
+-- ===========================================================================
+-- ---------------------------------------------------------------------------
+-- 톤 표기 → 숫자. '1만톤'=10000 · '2천톤급'=2000 · '500톤'=500
+--
+-- 실제 값 20종 전부에 대해 파싱 결과를 대조했다(설계문서 §18).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION mart.ton_value(txt text) RETURNS numeric AS $$
+    SELECT CASE
+        WHEN txt ~ '만' THEN ((regexp_match(txt, '(\d+(?:\.\d+)?)\s*만'))[1])::numeric * 10000
+        WHEN txt ~ '천' THEN ((regexp_match(txt, '(\d+(?:\.\d+)?)\s*천'))[1])::numeric * 1000
+        ELSE ((regexp_match(txt, '(\d+(?:\.\d+)?)'))[1])::numeric
+    END;
+$$ LANGUAGE sql IMMUTABLE;
+
+-- ---------------------------------------------------------------------------
+-- 1. mart.anchorage_limit — 정박지별 톤급 제한
+--
+-- upa_anchorage 는 폴리곤 꼭짓점마다 행이 있어(정박지 하나에 최대 41행)
+-- DISTINCT 로 접는다. remark 는 같은 정박지 안에서 동일하다.
+--
+-- ★ 표기가 세 가지고 **부등호 방향이 서로 다르다.**
+--     '3만톤 이하'            → 상한만
+--     '2만톤 이상' · '5만톤 초과' → **하한만** (E3·B3-2)
+--     '2만톤 초과 ~ 5만톤 이하'  → 하한 + 상한
+--   전부 '이하'로 뭉뚱그리면 E3 판정이 정확히 뒤집힌다.
+-- ---------------------------------------------------------------------------
+CREATE VIEW mart.anchorage_limit AS
+WITH base AS (
+    SELECT DISTINCT facility_code, anchorage_name, anchorage_type, remark
+    FROM upa_anchorage
+    WHERE nullif(btrim(remark), '') IS NOT NULL
+),
+split AS (
+    SELECT *,
+           split_part(remark, '~', 1)               AS p1,
+           nullif(btrim(split_part(remark, '~', 2)), '') AS p2
+    FROM base
+)
+SELECT
+    facility_code, anchorage_name, anchorage_type,
+    remark AS limit_raw,
+    CASE WHEN p2 IS NOT NULL            THEN mart.ton_value(p1)
+         WHEN remark ~ '이상|초과'       THEN mart.ton_value(remark)
+    END AS min_ton,
+    CASE WHEN p2 IS NOT NULL            THEN mart.ton_value(p2)
+         WHEN remark ~ '이상|초과'       THEN NULL
+         ELSE mart.ton_value(remark)
+    END AS max_ton,
+    -- 법령 별표의 컬럼명이 '정박능력(G/T)' · '제한톤수(G/T)' 다(2026-09-20 확인).
+    -- portmis_vessel.gross_tonnage 와 같은 축이라 직접 비교된다.
+    'GT'::text AS unit
+FROM split;
+
+-- ---------------------------------------------------------------------------
+-- 2. mart.anchorage_audit — 정박지 배정의 톤급 적합성
+--
+-- 판정:
+--   OK           제한 범위 안
+--   NOT_ALLOWED  상한 초과 — 그 정박지에 댈 수 없는 크기
+--   BELOW_MIN    하한 미달 — 안전 위험이 아니라 **지정 위반**이다.
+--                (E3 는 2만톤 이상 전용이라 소형선이 오면 자리를 잘못 쓴 것)
+--                NOT_ALLOWED 와 섞지 않는다 — 대응이 다르다.
+--   UNKNOWN      총톤수 또는 제한 미상
+--
+-- 정박지 수심은 upa_anchorage 에 없다. 그래서 흘수 게이트는 하지 않는다 —
+-- 없는 값을 지어내지 않는다.
+-- ---------------------------------------------------------------------------
+CREATE VIEW mart.anchorage_audit AS
+WITH occ AS (
+    -- 같은 항차가 신고 차수마다 다시 들어오므로 입항건 단위로 접는다.
+    -- (raw 레코드를 그대로 세면 실측상 1.5배 부풀려진다 — §18)
+    SELECT DISTINCT ON (callsgn, entry_year, entry_count)
+           callsgn, entry_year, entry_count, vessel_name, gross_tonnage,
+           ship_kind_nm, entry_purpose_nm, arrival_report_type,
+           arrival_facility_cd, arrival_facility_sub_code, arrival_facility_nm,
+           arrival_at_utc, departure_at_utc
+    FROM portmis_vessel
+    WHERE arrival_facility_cd IS NOT NULL
+    ORDER BY callsgn, entry_year, entry_count, arrival_at_utc DESC NULLS LAST
+)
+SELECT
+    o.callsgn, o.vessel_name, o.entry_year, o.entry_count,
+    o.ship_kind_nm, o.entry_purpose_nm, o.arrival_report_type,
+    o.arrival_facility_cd  AS facility_cd,
+    o.arrival_facility_sub_code AS facility_sub_code,
+    o.arrival_facility_nm  AS facility_name_reported,
+    l.anchorage_name, l.anchorage_type,
+    o.arrival_at_utc, o.departure_at_utc,
+    o.gross_tonnage,
+    l.limit_raw, l.min_ton, l.max_ton, l.unit,
+    CASE
+        WHEN o.gross_tonnage IS NULL                     THEN 'UNKNOWN'
+        WHEN l.min_ton IS NULL AND l.max_ton IS NULL     THEN 'UNKNOWN'
+        WHEN l.max_ton IS NOT NULL
+             AND o.gross_tonnage > l.max_ton             THEN 'NOT_ALLOWED'
+        WHEN l.min_ton IS NOT NULL
+             AND o.gross_tonnage < l.min_ton             THEN 'BELOW_MIN'
+        ELSE 'OK'
+    END AS tonnage_verdict,
+
+    -- ★ 위반의 **확정도**. PORT-MIS 는 신고 데이터라 '최초/변경' 은 예정이고
+    --   '최종' 이라야 확정에 가깝다. 둘을 같은 경고로 내보내면 대응이 섞인다.
+    --
+    --     PLANNED   입항 전 신고 단계 — 조정 가능. **이 시점 경고가 가장 쓸모 있다**
+    --     REPORTED  최종 신고까지 초과 — 관제 확인 대상
+    --
+    --   실측(2026-09-20): E1 초과 5건은 전부 최초·변경이고 최종 신고가 없었다.
+    --   즉 '신고 기준 초과'이지 실제 투묘 위반으로 확정된 것은 아니다.
+    CASE
+        WHEN o.arrival_report_type = '최종' THEN 'REPORTED'
+        ELSE 'PLANNED'
+    END AS verdict_confidence
+FROM occ o
+-- 정박지 판별은 코드 접두어로 추측하지 않는다 — 레지스트리와 대조한다.
+-- upa_anchorage.facility_code 가 'WAE-02' 결합형이다.
+JOIN mart.anchorage_limit l
+  ON l.facility_code = o.arrival_facility_cd || '-'
+                       || lpad(o.arrival_facility_sub_code, 2, '0');
+
+COMMENT ON VIEW mart.anchorage_limit IS
+    '정박지별 톤급 제한(upa_anchorage.remark 파싱). 이상/이하/범위 세 표기를 구분한다';
+COMMENT ON VIEW mart.anchorage_audit IS
+    'PORT-MIS 정박지 배정의 톤급 적합성(총톤수 G/T 기준, 법령 별표로 확인). verdict_confidence 로 예정/확정을 구분한다';
+
+-- --- 7-4. mart.approval_candidates ---
+-- ===========================================================================
+-- mart.approval_candidates — 관제사 승인 대기 후보 (입항 예정 + 선석 미배정)
+--
+-- ---------------------------------------------------------------------------
+-- 이 파일이 왜 뒤늦게 생겼나 (2026-09-21)
+-- ---------------------------------------------------------------------------
+--   이 뷰는 DB 에는 있었지만 **저장소 어디에도 DDL 이 없었다.** 누군가 psql 에서
+--   직접 만들고 커밋하지 않은 것이다. 저장소만으로 DB 를 재구성하면 이 뷰는
+--   생기지 않았다.
+--
+--   실제로 사고가 났다. 2026-09-21 에 mart.cargo_msds 를 재작성하면서
+--   `DROP VIEW ... CASCADE` 를 했더니 이 뷰가 의존 관계로 함께 삭제됐고,
+--   복구할 원본이 저장소에 없었다. 살아 있는 DB 의 pg_get_viewdef() 출력으로
+--   되살린 것이 아래 정의다 — DB 가 먼저 죽었으면 영영 잃을 뻔했다.
+--
+--   ※ docs/13 §2-C 는 이 뷰의 필터 리터럴이 mojibake('%������%') 라고 적었는데
+--     그건 **사실이 아니다.** client_encoding 을 UTF8 과 EUC_KR 로 각각 바꿔
+--     두 번 확인한 결과 저장된 정의는 정상적인 '%정박지%' 였다(2026-09-21).
+--     문서 작성 당시 조회 도구가 한글을 못 읽은 것이다. 필터는 잘 동작한다
+--     (실측 29행 반환). 반면 "DDL 이 저장소에 없다"는 지적은 사실이었다.
+--
+-- ---------------------------------------------------------------------------
+-- 무엇을 뽑는가
+-- ---------------------------------------------------------------------------
+--   온산항(port_agency_cd='820')에 **내일 이후 입항 예정**인 액체화물선 중,
+--   아직 출항하지 않았고, 계선시설이 비었거나 '정박지'로 배정된 건.
+--
+--   즉 "선석이 아직 정해지지 않아 관제사 판단이 필요한 배"다. 실측(2026-09-21)
+--   기준 portmis_vessel 550행의 배정 분포가 아래와 같아, 이 뷰의 대상이
+--   전체의 절반을 넘는다:
+--       정박지 배정  285행 (51.8%)
+--       선석 배정    219행 (39.8%)
+--       미배정        46행 ( 8.4%)
+--
+--   draught 는 upa_vessel_position 최신 1건에서 가져오되, 없으면 3.0m 로
+--   가정하고 draught_is_estimated=true 로 표시한다 — 흘수가 없다고 후보에서
+--   빼면 AIS 정적신호를 안 보내는 배가 통째로 화면에서 사라지기 때문이다.
+--   (추정값을 게이트에 그대로 쓰면 안 된다. 표시용이다.)
+--
+-- 선행 조건: mart.cargo_msds (cargo_msds_v2.sql), upa_vessel_position, portmis_vessel
+-- ===========================================================================
+CREATE VIEW mart.approval_candidates AS
+SELECT
+    pm.id                       AS portmis_vessel_id,
+    pm.callsgn,
+    pm.vessel_name,
+    pm.ship_kind_category,
+    pm.is_liquid_cargo_vessel,
+    pm.arrival_at_utc,
+    pm.departure_sched_utc,
+    pm.arrival_facility_nm,
+    pm.gross_tonnage,
+    pm.agency_name,
+    pos.latitude,
+    pos.longitude,
+    pos.sog,
+    pos.nav_status_code,
+    pos.received_at_utc         AS position_last_seen_utc,
+    COALESCE(pos.draught, 3.0::double precision) AS draught,
+    pos.draught IS NULL         AS draught_is_estimated,
+    cm.cargo_name_raw,
+    cm.dg_un_no,
+    cm.cargo_basis,
+    cm.chem_id,
+    cm.cas_no,
+    cm.flash_point_celsius,
+    cm.imdg_class,
+    cm.signal_word,
+    cm.msds_matched
+FROM portmis_vessel pm
+LEFT JOIN LATERAL (
+    SELECT p.latitude, p.longitude, p.sog, p.nav_status_code,
+           p.received_at_utc, p.draught
+    FROM upa_vessel_position p
+    WHERE upper(btrim(p.callsgn)) = upper(btrim(pm.callsgn))
+    ORDER BY p.received_at_utc DESC NULLS LAST
+    LIMIT 1
+) pos ON true
+LEFT JOIN mart.cargo_msds cm
+       ON cm.callsgn = upper(btrim(pm.callsgn))
+WHERE pm.port_agency_cd = '820'
+  AND pm.is_liquid_cargo_vessel
+  AND pm.departure_at_utc IS NULL
+  AND (pm.arrival_facility_nm IS NULL OR pm.arrival_facility_nm LIKE '%정박지%')
+  AND pm.arrival_at_utc >= (
+        (date_trunc('day', (now() AT TIME ZONE 'Asia/Seoul')) + interval '1 day')
+        AT TIME ZONE 'Asia/Seoul');
+
+COMMENT ON VIEW mart.approval_candidates IS
+    '온산항 입항예정 액체화물선 중 선석 미배정(정박지 또는 공란) 건 — 관제사 승인 후보. DDL 은 approval_candidates.sql(2026-09-21 저장소 편입)';
+
