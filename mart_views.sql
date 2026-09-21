@@ -1347,10 +1347,17 @@ berth_range AS (
     ) AS t(wharf_name, depth_max_m)
 ),
 vessel AS (
+    -- ★ 2026-09-21 — 흘수 0 은 "0m"가 아니라 "선박이 보내지 않음"이다.
+    --   UPA 선박위치 흘수는 NULL 이 한 건도 없고 대신 0 으로 온다(최근 하루 6,724행 중
+    --   0 이 1,618행 = 24%). 예전엔 IS NOT NULL 로 걸러서 0 을 실제 흘수로 계산했고,
+    --   그 결과 여유가 표 수심만큼 커져 'OK'가 됐다(실측: 정일2부두 수성7 흘수 0 → 여유
+    --   13.09m, OK). 모르는 것을 안전으로 판정한 셈이다. 0 을 빼면 그 배의 가장 최근
+    --   유효 흘수를 쓰고, 한 번도 보낸 적이 없으면 흘수 없음 → UNKNOWN 이 된다.
+    --   backtest_false_alarm.py · arrival_watcher.py 는 원래 draught > 0 으로 거르고 있었다.
     SELECT DISTINCT ON (upper(btrim(callsgn)))
            upper(btrim(callsgn)) AS callsgn, draught, received_at_utc
     FROM upa_vessel_position
-    WHERE nullif(btrim(callsgn), '') IS NOT NULL AND draught IS NOT NULL
+    WHERE nullif(btrim(callsgn), '') IS NOT NULL AND draught > 0
     ORDER BY upper(btrim(callsgn)), received_at_utc DESC
 ),
 pc AS (
