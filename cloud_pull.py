@@ -176,7 +176,7 @@ def load_to_db(s3) -> list[str]:
     """staging → 로컬 DB. 실패한 도메인 이름 목록을 반환한다(없으면 빈 목록)."""
     from data_pipeline.upa.upa_loader import load_all as upa_load
     from data_pipeline.loaders import (
-        tide_pg_loader, wave_pg_loader, weather_pg_loader,
+        tide_pg_loader, tide_forecast_pg_loader, wave_pg_loader, weather_pg_loader,
         weather_forecast_pg_loader, portmis_pg_loader, mart_pg_loader,
     )
     steps = [
@@ -185,6 +185,9 @@ def load_to_db(s3) -> list[str]:
         ("파고", wave_pg_loader.load),
         ("기상 관측", weather_pg_loader.load),
         ("단기예보", weather_forecast_pg_loader.load),
+        # 조석예보(고·저조, 7일) - 백엔드 흘수 판정(services/tide.py)과 정밀 검토 전망이
+        # tide_forecast 표를 읽는다. EC2 의 run_pipeline all 이 staging 에 만들어 둔다.
+        ("조석예보", tide_forecast_pg_loader.load),
         ("PORT-MIS", portmis_pg_loader.load),
         ("선박위치 이력 (시각별 원본 재생)", lambda: backfill_vessel_positions(s3)),
         ("마트", mart_pg_loader.load),  # 파생 테이블 — 반드시 마지막
