@@ -1428,6 +1428,11 @@ SELECT
     pc.arrival_at_utc,
     COALESCE(b.depth_max_m, b.chart_depth_m)            AS chart_depth_max_m
 FROM pc
+-- ★ LEFT JOIN 이어야 한다(dev 2026-08-15 의 근거를 그대로 둔다). INNER JOIN 이면
+--   wharf 에 제원이 없는 부두(부이·신규 부두)에 접안한 선박이 판정 결과에서 통째로
+--   사라진다. 그러면 "위험하지 않다"가 아니라 "아예 안 보인다"가 되어
+--   UNIDENTIFIED·NO_SIGNAL 을 살려둔 이 프로젝트 원칙과 정면으로 어긋난다.
+--   제원이 없으면 chart_depth_m 이 NULL 이 되고 draught_verdict 는 'UNKNOWN' 이다.
 LEFT JOIN mart.facility_alias fa
        ON fa.source_name = pc.facility_name AND fa.facility_type = 'BERTH'
 -- ★ 마스터 표기로 먼저 직접 붙이고, 안 되면 facility_alias 를 거친다.

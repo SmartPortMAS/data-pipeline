@@ -169,10 +169,18 @@ def collect_weather_forecast_raw() -> str:
 
     all_items: list[dict] = []
     grids: list[dict] = []
+    errors: list[str] = []
     for name, lat, lon in FORECAST_POINTS:
         nx, ny = latlon_to_grid(lat, lon)
         print(f"[단기예보 수집] {name} ({lat:.5f}, {lon:.5f}) -> 격자 nx={nx} ny={ny}")
-        items = fetch_forecast(nx=nx, ny=ny)
+        # 격자 하나가 실패해도 나머지는 저장한다(dev 2026-09-21). 정박지 격자가
+        # 빠졌다고 부두 판정까지 끊기면 안 된다 — 전부 실패했을 때만 예외를 올린다.
+        try:
+            items = fetch_forecast(nx=nx, ny=ny)
+        except Exception as e:  # noqa: BLE001
+            print(f"  [실패] {e}")
+            errors.append(f"{name}({nx},{ny}) {e}")
+            continue
         wav = [i["fcstValue"] for i in items if i.get("category") == "WAV"]
         print(f"  -> {len(items)}건 | WAV {len(wav)}건 "
               f"(값 {sorted(set(wav))[:6] if wav else '없음'})")
@@ -184,6 +192,9 @@ def collect_weather_forecast_raw() -> str:
         all_items.extend(items)
         grids.append({"nx": nx, "ny": ny, "name": name,
                       "latitude": lat, "longitude": lon})
+
+    if not all_items:
+        raise RuntimeError("단기예보 수집 전부 실패: " + "; ".join(errors))
 
     collected_at_utc = datetime.now(timezone.utc).isoformat()
     base_date = all_items[0]["baseDate"] if all_items else ""
