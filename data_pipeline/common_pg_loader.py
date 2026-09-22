@@ -191,11 +191,67 @@ def upsert_dataframe(
     return len(df)
 
 
+# ---------------------------------------------------------------------------
+# 앞자리 0 이 의미를 갖는 식별자 컬럼 — 반드시 문자열로 읽는다.
+#
+# [2026-09-21] pandas 는 '001128' 을 정수 1128 로 추론한다. 그대로 적재하면
+# MSDS chem_id 조인이 통째로 빈다(실측: mart.cargo_msds 의 msds_matched 757행 중
+# 0행). 값이 사라진 게 아니라 '앞자리 0 이 사라져' 안 맞는 거라, NULL 검사로는
+# 안 잡히고 조인 결과만 조용히 0 이 된다 — 가장 찾기 어려운 종류의 결함이다.
+#
+# gen_cargo_manifest 가 dg_un_no 를 문자열로 강제하는 것과 같은 이유이고
+# (그쪽 주석 참고), 방어는 CSV 를 만드는 쪽이 아니라 **읽는 이 계층**에도
+# 있어야 한다. 쓰는 쪽이 여럿이기 때문이다.
+#
+# 여기 없는 컬럼이 같은 함정에 빠지면 증상이 똑같다 — 새 코드성 컬럼을 추가할 때
+# 앞자리 0 이 있을 수 있으면 이 목록에 먼저 넣을 것.
+#
+# [2026-09-22] 접미사로 맞춘다 — 정확히 일치시키다 실제로 뚫렸다.
+#   PORT-MIS 는 같은 코드를 입·출항으로 나눠 보내서 컬럼명이
+#   `arrival_facility_sub_code` · `departure_facility_sub_code` 다. 목록에는
+#   접두사 없는 `facility_sub_code` 만 있었고, pandas dtype 은 키가 정확히
+#   같아야 적용되므로 두 컬럼 다 보호 밖이었다.
+#
+#   결과(실측 2026-09-22, 현재 staging CSV):
+#       arrival_facility_sub_code    int64    [1, 3, 2, 12, 32, 5]     ← '01' 의 0 이 날아감
+#       departure_facility_sub_code  float64  [2.0, 1.0, 12.0, ...]    ← NaN 이 섞여 실수화
+#   원천 raw 는 줄곧 '01'·'02'·'12' 로 0 패딩해서 보낸다(raw JSON 확인). 즉
+#   손상은 전적으로 이 지점에서 생겼고, DB 에도 9/20 이후 수집분 182건이 비패딩으로
+#   들어가 portmis_facility_map(전부 0패딩) 과 조인이 끊겼다.
+#
+#   접미사 매칭이면 앞으로 붙을 arrival_/departure_/prev_ 같은 접두사 변형이
+#   자동으로 덮인다. 부분 문자열이 아니라 접미사인 이유는 `mmsi` 가 우연히 들어간
+#   다른 이름(예: `mmsi_source`)까지 문자열로 굳히지 않기 위해서다.
+# ---------------------------------------------------------------------------
+TEXT_ID_COLUMNS = (
+    "chem_id",          # MSDS 물질 ID — 6자리 제로패딩 (예: 001128)
+    "cas_no",           # CAS 번호 — 하이픈 포함이지만 방어적으로 고정
+    "dg_un_no",         # UN 번호 — 4자리
+    "callsgn",          # 호출부호 — 숫자만인 국내선이 있다 (예: 010511)
+    "facility_code", "facility_cd", "facility_sub_code",
+    "port_code", "station_id",
+    # ※ mmsi 는 일부러 넣지 않는다. 여기 있었는데 upa_vessel_position.mmsi 가
+    #   bigint 라, 문자열로 굳힌 임시표를 INSERT ... SELECT 하면서
+    #   "column mmsi is of type bigint but expression is of type text" 로 깨졌다.
+    #   실측: 2026-09-21 20:06 부터 [vessel] 도메인이 5분마다 66회 연속 실패 —
+    #   선박위치가 이 프로젝트에서 가장 실시간성이 중요한 피드인데 10시간 멈췄다.
+    #   MMSI 는 MID 가 2~7 로 시작해 앞자리 0 이 없고, 저장 타입도 정수라 애초에
+    #   0 패딩을 보존할 수 없다 — 이 목록에 있을 이유가 없다.
+)
+
+
+def _text_dtypes(csv_path: str) -> dict:
+    """헤더를 먼저 읽어, TEXT_ID_COLUMNS 로 끝나는 컬럼을 전부 문자열로 지정한다."""
+    header = pd.read_csv(csv_path, nrows=0).columns
+    return {c: str for c in header
+            if any(c == t or c.endswith("_" + t) for t in TEXT_ID_COLUMNS)}
+
+
 def load_csv(
     engine: Engine, csv_path: str, table: str, unique_cols: list,
     auto_create: bool = True, row_filter=None,
 ) -> int:
-    df = pd.read_csv(csv_path)
+    df = pd.read_csv(csv_path, dtype=_text_dtypes(csv_path))
     if df.empty:
         print(f"[SKIP] {csv_path} empty")
         return 0

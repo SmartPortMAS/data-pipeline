@@ -154,12 +154,21 @@ class UpaClient:
         return items
 
     # ----- 저장 --------------------------------------------------------------
-    def save_raw(self, prefix: str, items: list, with_date: bool = True) -> str:
+    def save_raw(self, prefix: str, items: list, with_date: bool = True,
+                 hourly: bool = False) -> str:
         """
-        raw 저장. 두 개를 만든다.
-          1) 날짜 스냅샷  : upa_xxx_20260618_raw.json  (이력 보존)
-          2) 최신 고정본  : upa_xxx_raw.json           (전처리가 읽는 파일)
+        raw 저장. 두 개(hourly 면 세 개)를 만든다.
+          1) 날짜 스냅샷  : upa_xxx_20260618_raw.json      (이력 보존)
+          2) 최신 고정본  : upa_xxx_raw.json               (전처리가 읽는 파일)
+          3) 시각 스냅샷  : upa_xxx_20260618T05Z_raw.json  (hourly=True 일 때만, UTC)
         반환값은 전처리가 읽는 최신 고정본 경로.
+
+        3) 이 필요한 이유 (2026-09-17 실측): 선박위치 API 는 선박당 **마지막 한 점**만
+        돌려준다. 그런데 1) 날짜 스냅샷은 매시 같은 이름으로 덮어써서 S3 에도 하루에
+        마지막 실행분 1개만 남았고, 로컬 적재는 PC 가 켜진 시각의 최신본만 받으므로
+        PC 가 꺼져 있던 시간의 위치 이력이 영구히 사라졌다(30일 중 13일).
+        시각별 파일은 cloud_pull.py 가 밀린 것까지 순서대로 재생한다.
+        파일명 시각은 실행 환경 시간대와 무관하게 UTC 로 고정한다(EC2=UTC, 로컬=KST).
         """
         os.makedirs(RAW_DIR, exist_ok=True)
         payload = {
@@ -176,6 +185,11 @@ class UpaClient:
             snap = os.path.join(RAW_DIR, f"{prefix}_{today}_raw.json")
             with open(snap, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
+        if hourly:
+            stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%HZ")
+            hour_snap = os.path.join(RAW_DIR, f"{prefix}_{stamp}_raw.json")
+            with open(hour_snap, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
         return latest
 
     # ----- (A) 전체 조회형 ---------------------------------------------------
@@ -183,7 +197,7 @@ class UpaClient:
         ep, prefix = ENDPOINTS["vessel_position"]
         items = self.fetch_all(ep)
         print(f"[COLLECT] 선박위치 {len(items)}건")
-        return self.save_raw(prefix, items)
+        return self.save_raw(prefix, items, hourly=True)
 
     def collect_berth_facility(self, prt_nm: str = None) -> str:
         ep, prefix = ENDPOINTS["berth_facility"]

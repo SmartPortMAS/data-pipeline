@@ -47,6 +47,7 @@
 
 ```
 조위:     tide_collector.py   →  tide_obs_YYYYMMDD_raw.json   →  tide_obs_stg.csv
+조위예보: tide_forecast_collector.py → tide_forecast_YYYYMMDD_raw.json → tide_forecast_stg.csv
 파고:     wave_collector.py   →  wave_obs_YYYYMMDD_raw.json   →  wave_obs_stg.csv
 항만기상: weather_collector.py → weather_obs_YYYYMMDD_raw.json → weather_obs_stg.csv
 ```
@@ -104,7 +105,7 @@ pip install -r data_pipeline/requirements.txt
 `.env.example`을 복사하여 `.env`를 만들고 아래 항목을 채운다.
 
 ```env
-# 조위 (국립해양조사원 공공데이터포탈)
+# 조위 실측 + 조위 예보 (국립해양조사원 공공데이터포탈) — 두 서비스가 같은 키를 쓴다
 KHOA_API_KEY=디코딩된_API_키
 
 # 파고 (기상청 APIHUB)
@@ -495,6 +496,7 @@ python -m data_pipeline.preprocessors.weather_preprocessor
 ```
 완료
   ✅ 조위 실시간 수집 (국립해양조사원, 울산 DT_0020)
+  ✅ 조위 예보 수집 (국립해양조사원 조석예보, 울산 DT_0020 고·저조 7일치) — 2026-09-20
   ✅ 파고 실시간 수집 (기상청 BUOY, 울산 STN 22189)
   ✅ 항만기상 실시간 수집 (해양수산부, 울산항동방파제서단등대)
   ✅ 전처리 및 staging CSV 적재

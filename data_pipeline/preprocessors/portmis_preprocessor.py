@@ -39,11 +39,27 @@ PORT-MIS 응답 컬럼 → 표준 컬럼 매핑:
     departure_laidupFcltyCd  → departure_facility_cd (출항 시점 계선시설 코드)
     departure_laidupFcltyNm  → departure_facility_nm (출항 시점 계선시설 명)
     departure_dstnEtryptDt   → dest_arrival_utc      (목적지 입항 예정 일시)
+
+    (2026-09-13) raw에는 있었으나 그동안 COLUMN_MAP 누락으로 버려지던 필드 추가
+    (backend 0019 마이그레이션과 세트 — 저 표에 컬럼이 먼저 있어야 함):
+    arrival_laidupFcltySubCd   → arrival_facility_sub_code   (계선시설 서브코드.
+                                  upa_port_call.facility_spec_sub_code와 같은 체계)
+    departure_laidupFcltySubCd→ departure_facility_sub_code
+    arrival_intrlGrtg          → intrl_gross_tonnage  (국제총톤수, gross_tonnage와 다른 값)
+    arrival_ldadngFrghtClCd    → cargo_class_code      (화물명세 코드)
+    arrival_ldadngTon          → cargo_onboard_ton     (입항 시 적재 중인 화물톤수)
+    arrival_trnpdtTon          → cargo_transship_ton   (환적톤수)
+    arrival_landngFrghtTon     → cargo_unload_ton      (양하화물톤 - 입항상세)
+    departure_ldFrghtTon       → cargo_load_ton        (적하화물톤 - 출항상세)
+
+    선원수(crewCo 등)·도선여부(piltgYn)는 의도적으로 제외 — 판정에 쓸 용도가
+    없고(선원수) 액체화물선 특성상 변별력이 낮다(도선여부, 거의 상수 예상).
 """
 
 import os
 import sys
 import glob
+import re
 import json
 import pandas as pd
 import numpy as np
@@ -84,11 +100,24 @@ COLUMN_MAP = {
     "arrival_tkoffPrrrnDt":    "departure_sched_utc",
     "arrival_grtg":            "gross_tonnage",
     "arrival_satmntEntrpsNm":  "agency_name",
+    # 입항 신고구분(최초/변경/최종) — 입항 예정 창 수집(2026-09-17)으로 미래 신고가
+    # 들어오므로, 지금 값이 예정인지 확정인지 구분하려고 보존한다(alembic 0018).
+    "arrival_reqstSeNm":       "arrival_report_type",
     # 출항 이벤트(departure_ 접두) — 아직 출항 전이면 전부 결측으로 남는다(정상)
     "departure_tkoffDt":       "departure_at_utc",
     "departure_laidupFcltyCd": "departure_facility_cd",
     "departure_laidupFcltyNm": "departure_facility_nm",
     "departure_dstnEtryptDt":  "dest_arrival_utc",
+    # (2026-09-13) 시설 서브코드 + 화물톤수 — backend 0019 마이그레이션과 세트.
+    # 선원수·도선여부는 의도적으로 제외(모듈 docstring 참고).
+    "arrival_laidupFcltySubCd":   "arrival_facility_sub_code",
+    "departure_laidupFcltySubCd": "departure_facility_sub_code",
+    "arrival_intrlGrtg":          "intrl_gross_tonnage",
+    "arrival_ldadngFrghtClCd":    "cargo_class_code",
+    "arrival_ldadngTon":          "cargo_onboard_ton",
+    "arrival_trnpdtTon":          "cargo_transship_ton",
+    "arrival_landngFrghtTon":     "cargo_unload_ton",
+    "departure_ldFrghtTon":       "cargo_load_ton",
 }
 
 # tz 오프셋이 붙어 오는 필드(예: "2026-06-01T00:10:00+09:00") — parse_datetime_utc가
@@ -178,8 +207,27 @@ LIQUID_NAME_KEYWORDS = ("유조", "원유", "석유", "케미칼", "화학", "�
 def preprocess_portmis():
     print("=== PORT-MIS 선박입출항 데이터 전처리 시작 ===")
 
-    # 1. raw 파일 목록 수집 (가장 최신 파일 우선)
-    raw_files = sorted(glob.glob(os.path.join(RAW_PORTMIS_DIR, "portmis_vessel_*.json")), reverse=True)
+    # 1. raw 파일 목록 수집 — 오래된 파일부터 (2026-09-17 수정)
+    #
+    # 예전엔 최신 파일을 먼저 합쳤는데(reverse=True), 적재기는 같은 자연키가 여러 번
+    # 나오면 "마지막" 행을 남긴다(common_pg_loader.load_csv keep="last"). 그래서 같은
+    # 항차가 여러 파일에 있으면 가장 오래된 값이 최신 값을 덮어썼다. 입항 예정 창을
+    # 매시 다시 조회하면 같은 항차가 최초 -> 변경 -> 최종으로 여러 파일에 남으므로
+    # 이 순서가 곧 정확도다. 아래 3-1에서 최신 1행만 남긴다.
+    #
+    # 정렬 기준은 파일명 전체가 아니라 (종료일, 시작일, 수정 시각)이다. 시작일은
+    # 겹침 때문에 뒤로 갈 수 있어 이름순이 실행 순서와 어긋난다(실측: 오늘 실행한
+    # 20260820_20260920 이 8/24 실행한 20260821_20260824 보다 앞에 와서 옛 값이
+    # 이겼다). 종료일은 실행일(+3일)을 따라 늘기만 한다.
+    def _collected_order(path):
+        m = re.search(r"portmis_vessel_(\d{8})_(\d{8})\.json$", path)
+        start, end = (m.group(1), m.group(2)) if m else ("", "")
+        return (end, start, os.path.getmtime(path))
+
+    raw_files = sorted(
+        glob.glob(os.path.join(RAW_PORTMIS_DIR, "portmis_vessel_*.json")),
+        key=_collected_order,
+    )
     if not raw_files:
         print(f"[오류] 처리할 파일이 없습니다. 경로: {RAW_PORTMIS_DIR}")
         return
@@ -218,6 +266,15 @@ def preprocess_portmis():
     # 3. 결측값 표준화
     df = cu.normalize_nulls(df)
 
+    # 3-1. 같은 항차(호출부호+입항연도+입항횟수)는 가장 나중에 수집한 행만 남긴다.
+    # 위 1번에서 오래된 파일부터 합쳤으므로 keep="last" = 최신 신고.
+    _key = [c for c in ("callsgn", "entry_year", "entry_count") if c in df.columns]
+    if len(_key) == 3:
+        _before = len(df)
+        df = df.drop_duplicates(subset=_key, keep="last").reset_index(drop=True)
+        if len(df) < _before:
+            print(f"  같은 항차 중복 {_before - len(df)}행 -> 최신 수집분만 유지")
+
     # 4. 공통 메타데이터 추가
     df = cu.add_common_metadata(
         df,
@@ -227,7 +284,11 @@ def preprocess_portmis():
     )
 
     # 5. 숫자형 변환
-    df = cu.to_numeric_safe(df, ["entry_year", "entry_count", "ship_kind_cd", "gross_tonnage"])
+    df = cu.to_numeric_safe(df, [
+        "entry_year", "entry_count", "ship_kind_cd", "gross_tonnage",
+        "intrl_gross_tonnage", "cargo_onboard_ton", "cargo_transship_ton",
+        "cargo_unload_ton", "cargo_load_ton",
+    ])
 
     # 5-1. 시각 파싱 — arrival_at_utc/departure_at_utc는 원본에 +09:00 오프셋이
     # 붙어 오고(parse_datetime_utc가 그대로 처리), departure_sched_utc/
@@ -303,6 +364,33 @@ def preprocess_portmis():
         .map(port_cd_map)
         .fillna("기타")
     )
+
+    # 11-B. 입항일 필터 — 수집일(KST) 당일 입항분만 남긴다.
+    #
+    # [2026-09-13] PORT-MIS API 의 조회기간 파라미터(--start/--end)가 실제로는
+    # 입항일 필터가 아니다. 20260912~20260915 로 요청해도 8/19 입항분까지 딸려
+    # 온다(실측 409행 중 217행, 53% 가 요청기간 밖). 신고 접수일 기준으로 주는
+    # 것으로 보이는데, 신고는 입항 전에 미리 하므로 과거 건이 섞인다.
+    #
+    # 그래서 기간 한정은 우리 쪽에서 한다. 기준은 "수집일 당일 이후 입항":
+    #
+    #   · 과거분을 버리는 이유 — 이미 들어온 배는 배정 대상이 아니다. 재항 여부는
+    #     upa_vessel_position(실시간)과 upa_port_call(접안 이벤트)로 판단한다.
+    #   · 미래분을 남기는 이유 — 선석 배정은 미리 해야 한다. 오늘치만 받으면
+    #     내일·모레 들어올 배(실측 42척/17척)를 못 보고 당일치기 배정이 된다.
+    #
+    # 상한은 따로 두지 않는다 — 수집 시 --start/--end 로 요청한 범위가 곧 상한이다.
+    # 하루 1회 수집이므로 매일 그날 이후분이 갱신·추가되어 누적된다
+    # (적재는 callsgn+entry_year+entry_count UPSERT).
+    #
+    # ★ 날짜 비교는 KST 로 한다. arrival_at_utc 는 UTC 로 저장되므로 UTC 날짜로
+    #   자르면 KST 00:00~09:00 입항분(그날 새벽에 들어온 배)이 전날로 분류돼
+    #   통째로 빠진다.
+    target_kst = pd.Timestamp.now(tz="Asia/Seoul").normalize().date()
+    before = len(df)
+    arr_kst = pd.to_datetime(df["arrival_at_utc"], errors="coerce", utc=True).dt.tz_convert("Asia/Seoul")
+    df = df[arr_kst.dt.date >= target_kst].copy()
+    print(f"\n  입항일 필터({target_kst} KST 이후): {before} -> {len(df)}행")
 
     # 12. 요약 출력
     print(f"\n  전처리 후 행 수       : {len(df)}")

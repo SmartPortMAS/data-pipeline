@@ -1,0 +1,2 @@
+berth_id,wharf_name,berth_no,berth_name,length_m,quay_structure,water_depth_m,capacity_value,capacity_unit,concurrent_vessels,port_name,operator_name,handling_cargo_name,spec_source,note
+북신항 액체부두,북신항 액체부두,,북신항 액체부두,300.0,,15.0,,,1,울산신항,,,UPA_API,"UPA 웹 부두현황 117건에 없으나 PORT-MIS 가 MBN/31 로 배정한다. 공공 API(upa_berth_facility)에 안벽 300m·수심 15m 로 존재해 그 값을 옮겼다. 접안능력은 API 에도 결측이라 비워 둔다 — 추측해 채우지 않는다(감사 기준값)"

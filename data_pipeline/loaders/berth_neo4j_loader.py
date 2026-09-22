@@ -194,75 +194,84 @@ def _split_cargo_categories(handling_cargo_name: str | None) -> list[str]:
 
 
 def fetch_berth_rows(pg_conn) -> list[dict]:
-    """upa_berth_facility 전체를 읽어 Neo4j 배치 행으로 변환한다.
+    """berth × wharf 를 읽어 Neo4j 배치 행으로 변환한다.
 
-    동일 wharf_name이 여러 부두 운영주체로 중복 등록된 경우(SK2부두 등)
-    wharf_se_name을 id에 덧붙여 구분한다.
+    ★ (2026-09-20) 출처를 upa_berth_facility -> berth/wharf 로 교체했다.
+
+      예전에는 upa_berth_facility(부두 단위 68행)를 Berth 노드로 만들었다.
+      그런데 그 표는 **선석 단위 제원을 부두 하나로 뭉갠 것**이라 문제가 있었다:
+        - 접안능력이 68행 중 2행만 채워져 있어 배정 판정에 못 썼다
+        - 같은 부두 안에서 선석별 접안능력이 8배까지 차이 난다
+          (2부두: 1선석 40,000 / 2선석 20,000 / 3선석 5,000 DWT)
+        - wharf_name UPSERT 로 SK2부두 1행이 조용히 유실돼 있었다(실측 68 vs 69)
+
+      이제 berth(118 선석) × wharf(65 부두)를 읽는다. berth_id 가 이미 유일하므로
+      옛 `wharf_se_name` 접미사 우회도 필요 없다.
+      설계 근거: docs/11_선석제원_재설계_설계문서.md
+
+    취급화물 보정(mart.berth_handling_cargo)은 record_uid 가 아니라 **wharf_name**
+    으로 조인한다 — 새 berth 에는 record_uid 가 없고, 보정은 원래 부두 단위다.
     """
     with pg_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
-            SELECT bf.wharf_name, bf.port_name, bf.length_m, bf.depth_m,
-                   bf.berth_capacity, bf.unload_capacity, bf.berth_vessel_count,
-                   -- 원천 컬럼이 아니라 보정된 값을 쓴다(mart_views.sql 12절)
-                   bhc.handling_cargo_name,
-                   bf.wharf_se_name, bf.port_operator_name,
-                   bf.latitude, bf.longitude
-            FROM upa_berth_facility bf
-            JOIN mart.berth_handling_cargo bhc ON bhc.record_uid = bf.record_uid
-            WHERE bf.wharf_name IS NOT NULL AND bf.wharf_name <> ''
+            SELECT b.berth_id, b.wharf_name, b.berth_no,
+                   b.length_m, b.length_basis,
+                   b.water_depth_m, b.capacity_value, b.unload_value,
+                   b.quay_structure, b.operator_name AS berth_operator_name,
+                   w.port_name, w.latitude, w.longitude,
+                   w.port_name AS wharf_port_name,
+                   w.berth_count, w.berthing_vessel_count,
+                   w.total_quay_length_m,
+                   w.min_water_depth_m, w.min_capacity_dwt, w.max_capacity_dwt,
+                   w.facility_cd, w.facility_sub_code,
+                   COALESCE(bhc.handling_cargo_name, b.handling_cargo_name)
+                       AS handling_cargo_name
+            FROM berth b
+            JOIN wharf w ON w.wharf_name = b.wharf_name
+            LEFT JOIN (
+                SELECT DISTINCT ON (wharf_name) wharf_name, handling_cargo_name
+                FROM mart.berth_handling_cargo
+            ) bhc ON bhc.wharf_name = b.wharf_name
+            WHERE b.berth_id IS NOT NULL AND b.berth_id <> ''
+            ORDER BY b.wharf_name, b.berth_no NULLS FIRST
         """)
         raw_rows = cur.fetchall()
-
-    seen_names: dict[str, int] = {}
-    for row in raw_rows:
-        seen_names[row["wharf_name"]] = seen_names.get(row["wharf_name"], 0) + 1
 
     batch: list[dict] = []
     for row in raw_rows:
         name = row["wharf_name"]
-        berth_id = name if seen_names[name] == 1 else f"{name}({row['wharf_se_name'] or '?'})"
         batch.append({
-            "berth_id": berth_id,
+            "berth_id": row["berth_id"],
             "wharf_name": name,
+            "berth_no": row["berth_no"],
             "port_name": row["port_name"],
+            # 선석 단위 제원. 확정 못 한 값은 NULL 로 둔다 — 부두 집계값을 선석
+            # 값인 척 채우지 않는다(그게 거짓 안전을 만든다).
             "length_m": row["length_m"],
-            "depth_m": row["depth_m"],
-            # ONSAN_BERTH_CAPACITY_DWT 보정을 노드 속성 자체에 baked-in 한다
-            # (2026-08-19) — 예전엔 compute_substitutability_pairs/
-            # assign_fallback_anchorage 두 함수가 호출 시점마다 각자
-            # `berth_capacity or ONSAN_BERTH_CAPACITY_DWT.get(...)`를 따로
-            # 적용했는데, Berth.berth_capacity 속성 자체는 raw 값(69개 중
-            # 대부분 NULL, 07 문서 §4.1.1)이라 08 설계문서의 부이 게이트
-            # (§4.1.3-A, VLCC_BUOY_DWT_THRESHOLD 비교)처럼 새로 이 속성을
-            # 직접 읽는 소비자는 보정을 못 받는 문제가 있었다. 로더 단계에서
-            # 한 번만 보정해 두면 이후 모든 소비자(기존 두 함수 포함, 그쪽의
-            # `or` 폴백은 이미 보정된 값에 적용돼도 무해함)가 같은 값을 본다.
-            "berth_capacity": row["berth_capacity"] or ONSAN_BERTH_CAPACITY_DWT.get(name),
-            # 08_스케줄링_전면재설계_자동배정_설계문서.md §5.2.1-B — 소프트 가중치
-            # (타이브레이커)로만 쓴다. 결측이 많아(온산 액체화학 선석 다수는 있지만
-            # SK1~8·S-Oil 1~3 등은 NULL) 하드 게이트로 쓰지 않는다.
-            "unload_capacity": row["unload_capacity"],
-            # 2026-08-19 — Neo4j Berth 노드의 동시접안 슬롯 수. brthdVslCntVl(동시접안
-            # 가능 척수)이 이미 UPA 원본에 있었다. backend의 berth_assignment는 이제
-            # (berth 테이블 없이) upa_berth_facility.berth_vessel_count를 직접 읽는다.
-            "berth_vessel_count": row["berth_vessel_count"],
-            # 큐레이션 오버라이드 적용값 — HANDLES 관계(아래 categories)와 같은
-            # 값을 쓴다. raw 값을 그대로 두면 가스부두 등에서 "취급화물: 유류"로
-            # 표시돼(대시보드 BerthInfo) 실제 HANDLES("가스")와 화면 표시가
-            # 어긋난다.
+            "length_basis": row["length_basis"],
+            "depth_m": row["water_depth_m"],
+            "berth_capacity": row["capacity_value"]
+                              or ONSAN_BERTH_CAPACITY_DWT.get(name),
+            "unload_capacity": row["unload_value"],
+            "quay_structure": row["quay_structure"],
+            # 부두 단위 값(같은 부두의 선석들이 공유한다)
+            "wharf_berth_count": row["berth_count"],
+            "berth_vessel_count": row["berthing_vessel_count"],
+            "wharf_total_quay_length_m": row["total_quay_length_m"],
+            "wharf_min_depth_m": row["min_water_depth_m"],
+            "wharf_min_capacity_dwt": row["min_capacity_dwt"],
+            "wharf_max_capacity_dwt": row["max_capacity_dwt"],
+            "facility_cd": row["facility_cd"],
+            "facility_sub_code": row["facility_sub_code"],
             "handling_cargo_name": row["handling_cargo_name"],
-            "wharf_se_name": row["wharf_se_name"],
-            "port_operator_name": row["port_operator_name"],
+            "port_operator_name": row["berth_operator_name"],
+            # 좌표는 부두 단위다(웹에 선석 좌표가 없다). 같은 부두의 선석들은
+            # 같은 좌표를 갖는다 — ADJACENT_TO 거리계산에서 서로 인접으로
+            # 잡히는데, 실제로 맞닿아 있으므로 의도한 결과다.
             "latitude": row["latitude"],
             "longitude": row["longitude"],
             "categories": _split_cargo_categories(row["handling_cargo_name"]),
             "berth_group": ONSAN_BERTH_GROUP_MAP.get(name),
-            # 스케줄링 에이전트가 온산 선석을 우선 배정하는 근거가 되는 값.
-            # 백엔드는 coalesce(b.onsan_scope, false)로 읽는데(scheduling/
-            # graph_queries.py) 이 속성을 만드는 곳이 없어 69개 선석 전부
-            # false 였고, 그 결과 온산 우선 정렬이 한 번도 발동하지 못했다
-            # (실측 2026-08-15: 에탄올 요청에 '신항남방파제 T/S부두'(온산 밖)가
-            #  1순위로 배정됨 — 7/26 회의 요청 4번이 이 원인으로 남아 있었다).
             "onsan_scope": name in ONSAN_SCOPE_WHARF_NAMES,
         })
     return batch
@@ -274,37 +283,62 @@ def fetch_berth_rows(pg_conn) -> list[dict]:
 
 _CYPHER_MERGE_BERTH = """
 UNWIND $batch AS row
+// 부두(Wharf)는 선석의 부모다. 좌표·항 이름은 부두의 속성이고, 선석은 제원을
+// 갖는다 — 한쪽에 몰아넣으면 복제되거나 뭉개진다(설계문서 §5).
+MERGE (w:Wharf {name: row.wharf_name})
+SET w.port_name            = row.port_name,
+    w.latitude             = row.latitude,
+    w.longitude            = row.longitude,
+    w.berth_count          = row.wharf_berth_count,
+    w.berthing_vessel_count= row.berth_vessel_count,
+    w.total_quay_length_m  = row.wharf_total_quay_length_m,
+    w.min_water_depth_m    = row.wharf_min_depth_m,
+    w.min_capacity_dwt     = row.wharf_min_capacity_dwt,
+    w.max_capacity_dwt     = row.wharf_max_capacity_dwt,
+    w.facility_cd          = row.facility_cd,
+    w.facility_sub_code    = row.facility_sub_code,
+    w.onsan_scope          = row.onsan_scope,
+    w.updated_at           = datetime()
 MERGE (b:Berth {id: row.berth_id})
 ON CREATE SET
     b.wharf_name          = row.wharf_name,
+    b.berth_no            = row.berth_no,
     b.port_name           = row.port_name,
     b.length_m            = row.length_m,
+    b.length_basis        = row.length_basis,
     b.depth_m             = row.depth_m,
     b.berth_capacity      = row.berth_capacity,
     b.unload_capacity     = row.unload_capacity,
+    b.quay_structure      = row.quay_structure,
     b.handling_cargo_name = row.handling_cargo_name,
-    b.wharf_se_name       = row.wharf_se_name,
     b.port_operator_name  = row.port_operator_name,
     b.latitude            = row.latitude,
     b.longitude           = row.longitude,
     b.berth_group         = row.berth_group,
     b.onsan_scope         = row.onsan_scope,
+    b.facility_cd         = row.facility_cd,
+    b.facility_sub_code   = row.facility_sub_code,
     b.created_at          = datetime()
 ON MATCH SET
     b.wharf_name          = row.wharf_name,
+    b.berth_no            = row.berth_no,
     b.port_name           = row.port_name,
     b.length_m            = row.length_m,
+    b.length_basis        = row.length_basis,
     b.depth_m             = row.depth_m,
     b.berth_capacity      = row.berth_capacity,
     b.unload_capacity     = row.unload_capacity,
+    b.quay_structure      = row.quay_structure,
     b.handling_cargo_name = row.handling_cargo_name,
-    b.wharf_se_name       = row.wharf_se_name,
     b.port_operator_name  = row.port_operator_name,
     b.latitude            = row.latitude,
     b.longitude           = row.longitude,
     b.berth_group         = row.berth_group,
     b.onsan_scope         = row.onsan_scope,
+    b.facility_cd         = row.facility_cd,
+    b.facility_sub_code   = row.facility_sub_code,
     b.updated_at          = datetime()
+MERGE (b)-[:PART_OF]->(w)
 """
 
 # 이 선석이 더 이상 취급하지 않는 카테고리 관계를 먼저 끊는다.
@@ -402,21 +436,27 @@ def compute_adjacent_pairs_by_distance(
 
 
 def _resolve_pilot_pairs(batch: list[dict]) -> list[dict]:
-    """PILOT_ADJACENT_PAIRS의 wharf_name을 실제 berth_id로 해석한다.
+    """PILOT_ADJACENT_PAIRS(부두명 쌍)를 berth_id 쌍으로 편다.
 
-    중복 wharf_name(berth_id가 "이름(구분)" 형태로 바뀐 경우)은 파일럿 목록에
-    없으므로 단순 1:1 매핑으로 충분하다. 매칭 실패(수집 데이터에 해당
-    wharf_name이 없는 경우)는 경고만 남기고 스킵한다 — 수집 범위가 달라져도
-    로더가 죽지 않도록.
+    ★ (2026-09-20) 이제 Berth 노드가 **선석 단위**라 부두 하나에 선석이 여럿이다.
+      예전처럼 `{wharf_name: berth_id}` 사전을 만들면 부두당 마지막 선석 하나만
+      남아, 큐레이션한 인접 관계가 대부분 소실된다.
+      부두 A·B 가 인접이면 **A 의 모든 선석과 B 의 모든 선석**이 인접이므로
+      곱집합으로 편다.
     """
-    wharf_to_id = {row["wharf_name"]: row["berth_id"] for row in batch}
+    by_wharf: dict[str, list[str]] = {}
+    for row in batch:
+        by_wharf.setdefault(row["wharf_name"], []).append(row["berth_id"])
+
     resolved: list[dict] = []
     for name_a, name_b in PILOT_ADJACENT_PAIRS:
-        id_a, id_b = wharf_to_id.get(name_a), wharf_to_id.get(name_b)
-        if not id_a or not id_b:
+        ids_a, ids_b = by_wharf.get(name_a), by_wharf.get(name_b)
+        if not ids_a or not ids_b:
             logger.warning("파일럿 인접쌍 매칭 실패(수집 데이터에 없음): %s <-> %s", name_a, name_b)
             continue
-        resolved.append({"berth_a": id_a, "berth_b": id_b, "distance_m": None})
+        for ia in ids_a:
+            for ib in ids_b:
+                resolved.append({"berth_a": ia, "berth_b": ib, "distance_m": None})
     return resolved
 
 
@@ -446,8 +486,23 @@ def transfer_berths_to_neo4j(pg_conn, neo4j_driver) -> None:
     """
     batch = fetch_berth_rows(pg_conn)
     if not batch:
-        logger.warning("upa_berth_facility에 적재할 행이 없습니다.")
+        logger.warning("berth 테이블에 적재할 행이 없습니다.")
         return
+
+    # ★ (2026-09-20) 옛 구조를 먼저 깨끗이 지운다.
+    #   부두 단위 Berth(68개)와 선석 단위 Berth(118개)는 id 체계가 달라
+    #   MERGE 로는 옛 노드가 그대로 남는다. 남으면 스케줄링·조회가 두 체계를
+    #   동시에 보게 되어 조용히 틀린 결과가 나온다.
+    #   DETACH DELETE 로 관계까지 정리한 뒤 새로 만든다 — ADJACENT_TO/HANDLES 는
+    #   아래에서 전부 재생성되므로 손실이 없다.
+    with neo4j_driver.session(database=NEO4J_DATABASE) as session:
+        removed = session.run(
+            "MATCH (b:Berth) DETACH DELETE b RETURN count(b) AS c"
+        ).single()["c"]
+        removed_w = session.run(
+            "MATCH (w:Wharf) DETACH DELETE w RETURN count(w) AS c"
+        ).single()["c"]
+    logger.info("옛 구조 제거: Berth %d개, Wharf %d개", removed, removed_w)
 
     pilot_pairs = _resolve_pilot_pairs(batch)
     distance_pairs = compute_adjacent_pairs_by_distance(batch)
@@ -552,6 +607,31 @@ def _tx_set_cargo_kind_detail(tx, batch: list[dict]) -> None:
     tx.run(_CYPHER_SET_CARGO_KIND_DETAIL, batch=batch)
 
 
+# 해수청 시드 CSV(`ulsan_berth_spec_seed.csv`)의 부두 표기 -> 우리 부두명.
+#
+# 우리 부두명의 정본은 **UPA 공공 API** 다(설계문서 §5). 해수청 액체화물현황은
+# 표기가 달라서 _normalize_wharf_name 만으로는 안 붙는다. PORT-MIS 와는 무관한
+# 경로다 — PORT-MIS 이름은 portmis_facility_map 이 따로 다룬다.
+#
+# 키는 _normalize_wharf_name() 을 적용한 형태다. 값이 여러 개인 것은 해수청이
+# 한 줄로 묶어 적은 부두를 API 가 나눠 적기 때문이다(1:N).
+CARGO_KIND_WHARF_ALIAS: dict[str, list[str]] = {
+    "용잠부두": ["용잠1부두", "용잠2부두"],
+    "sk부이ii": ["SK2부이"],
+    "sk부이iii": ["SK3부이"],
+    "정일스톨트헤븐신항3~5부두": [
+        "정일스톨트헤븐 울산신항3부두",
+        "정일스톨트헤븐 울산신항4부두",
+        "정일스톨트헤븐 울산신항5부두",
+    ],
+    # 웹 상세가 신항2부두(270m)와 일치해 그쪽으로 확정했다(설계문서 §16).
+    "현대오일터미널신항부두": ["현대오일터미널 신항2부두"],
+    "ls니꼬신항부두": ["LS MNM 신항부두"],  # LS니꼬 -> LS MnM 사명 변경
+    # 'S-Oil&오일허브 부이'는 공공 API 에만 있고 웹 상세가 없어 우리 berth 에
+    # 아예 없다. 별칭으로 해결할 수 있는 건이 아니라 여기 넣지 않는다.
+}
+
+
 def transfer_cargo_kind_to_neo4j(pg_conn, neo4j_driver, *, csv_path: Path = CARGO_KIND_SEED_CSV) -> None:
     """cargo_kind 세분화 값을 이미 적재된 Berth 노드에 속성으로 추가한다.
 
@@ -569,10 +649,22 @@ def transfer_cargo_kind_to_neo4j(pg_conn, neo4j_driver, *, csv_path: Path = CARG
     for berth in berths:
         by_norm_name[_normalize_wharf_name(berth["wharf_name"])].append(berth["berth_id"])
 
+    by_wharf_name: dict[str, list[str]] = defaultdict(list)
+    for berth in berths:
+        by_wharf_name[berth["wharf_name"]].append(berth["berth_id"])
+
     batch: list[dict] = []
     unmatched: list[str] = []
     for row in csv_rows:
         berth_ids = by_norm_name.get(row["norm_name"])
+        if not berth_ids:
+            # 정규화로 안 붙으면 별칭 사전을 본다. 규칙을 늘리지 않고 사전으로
+            # 관리한다 — 규칙을 늘리면 다른 부두까지 잘못 묶기 시작한다.
+            berth_ids = [
+                bid
+                for wname in CARGO_KIND_WHARF_ALIAS.get(row["norm_name"], [])
+                for bid in by_wharf_name.get(wname, [])
+            ]
         if not berth_ids:
             unmatched.append(row["facility_name"])
             continue
@@ -665,8 +757,9 @@ def transfer_substitutability_to_neo4j(pg_conn, neo4j_driver) -> None:
     """
     batch = fetch_berth_rows(pg_conn)
     if not batch:
-        logger.warning("upa_berth_facility에 적재할 행이 없습니다.")
+        logger.warning("berth 테이블에 적재할 행이 없습니다.")
         return
+
 
     pairs = compute_substitutability_pairs(batch)
     if not pairs:

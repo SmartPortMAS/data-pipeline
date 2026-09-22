@@ -2,7 +2,10 @@
 기상청 단기예보 전처리기
 raw → staging: data/staging/weather_forecast_stg.csv
 
-출처: 공공데이터포털 VilageFcstInfoService_2.0/getVilageFcst (울산항 격자 nx=102 ny=84)
+출처: 공공데이터포털 VilageFcstInfoService_2.0/getVilageFcst
+      (격자는 수집기 FORECAST_POINTS 가 좌표에서 계산한다 — 울산항 (103,82) ·
+       정박지 해상. 격자는 행마다 nx·ny 로 남으므로 여기서는 격자 수와
+       무관하게 그대로 처리한다)
 
 raw는 (카테고리 x 예보시각) 조합마다 한 행이다 (예: WSD/20260719/0600 한 행,
 WAV/20260719/0600 한 행, ...). 이 전처리기는 (nx, ny, fcstDate, fcstTime) 기준으로

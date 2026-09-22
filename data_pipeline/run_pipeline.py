@@ -8,6 +8,7 @@
 
 실행:
     python -m data_pipeline.run_pipeline tide
+    python -m data_pipeline.run_pipeline tide_forecast
     python -m data_pipeline.run_pipeline wave
     python -m data_pipeline.run_pipeline weather
     python -m data_pipeline.run_pipeline weather_forecast
@@ -57,6 +58,19 @@ def run_tide() -> None:
     preprocess_tide()
     print("=== [tide] 3/3 DB 적재 ===")
     _load(load_tide)
+
+
+def run_tide_forecast() -> None:
+    from data_pipeline.collectors.tide_forecast_collector import collect_tide_forecast_raw
+    from data_pipeline.loaders.tide_forecast_pg_loader import load as load_tide_forecast
+    from data_pipeline.preprocessors.tide_forecast_preprocessor import preprocess_tide_forecast
+
+    print("=== [tide_forecast] 1/3 수집 ===")
+    collect_tide_forecast_raw()
+    print("=== [tide_forecast] 2/3 전처리 ===")
+    preprocess_tide_forecast()
+    print("=== [tide_forecast] 3/3 DB 적재 ===")
+    _load(load_tide_forecast)
 
 
 def run_wave() -> None:
@@ -186,16 +200,20 @@ def run_port_call() -> None:
 
 
 def run_portmis(start_date: str | None = None, end_date: str | None = None) -> None:
-    from data_pipeline.collectors.portmis_collector import collect_portmis, resolve_incremental_start_date
+    from data_pipeline.collectors.portmis_collector import (
+        collect_portmis,
+        resolve_incremental_start_date,
+        resolve_lookahead_end_date,
+    )
     from data_pipeline.loaders.portmis_pg_loader import load as load_portmis
     from data_pipeline.preprocessors.portmis_preprocessor import preprocess_portmis
 
-    today = datetime.datetime.now().strftime("%Y%m%d")
     # --start를 안 주면 "오늘부터"가 아니라 "마지막 수집 이후로 이어붙이기"가 기본이다
     # (2026-08-19) — 매일 이 명령을 그대로 재실행해도 그날그날 새로 입항한 건만
     # 자동으로 누적되도록 하기 위함(portmis_collector.py 모듈 docstring 참고).
+    # 종료일 기본값은 오늘이 아니라 오늘+3일 — 입항 예정 신고까지 받는다(2026-09-17).
     start_date = start_date or resolve_incremental_start_date()
-    end_date = end_date or today
+    end_date = end_date or resolve_lookahead_end_date()
 
     print(f"=== [portmis] 1/3 수집 ({start_date} ~ {end_date}) ===")
     collect_portmis(start_date=start_date, end_date=end_date)
@@ -265,34 +283,39 @@ def run_vessel_spec() -> None:
 
 
 def run_mart() -> None:
-    """staging 산출물을 결합해 통합 마트를 만들고 DB에 적재한다.
+    """구체화 뷰를 갱신한다.
 
-    수집 단계가 없는 파생 도메인 — ais/portmis(필수) 및 tide/wave/weather/UPA/MSDS
-    (있으면 병합) staging CSV가 먼저 준비되어 있어야 한다. `all` 실행 시
-    다른 도메인들이 끝난 뒤 마지막에 실행되도록 DOMAINS 순서를 유지할 것.
+    [2026-09-21] 물리 마트(`ulsan_vessel_mart`) 생성·적재 단계를 뺐다.
+
+    그 표는 선박위치 스냅샷에 PORT-MIS·기상·UPA·MSDS 를 붙여 83컬럼으로 넓힌
+    파생 표였는데, **읽는 곳이 한 군데도 없었다** — 백엔드 참조 0건, mart 스키마
+    뷰 의존 0건(2026-09-21 pg_depend 조회). 같은 결합을 `mart.dashboard_current`
+    등 뷰가 이미 하고 있고, 뷰는 원천이 갱신되면 바로 따라오는 반면 물리 마트는
+    이 단계를 다시 돌려야 해서 **두 값이 어긋날 수 있는 쪽**이었다. 964행이
+    남아 있었고 마지막 갱신 이후로 아무도 보지 않았다. 표는 alembic 0027 이 DROP 한다.
+
+    `create_mart.build_master_mart()` 와 `mart_pg_loader` 자체는 지우지 않았다 —
+    CSV 마트는 분석·백테스트에서 따로 쓸 수 있고, 되살리려면 이 함수에 두 줄을
+    다시 넣으면 된다.
+
+    구체화 뷰 갱신은 그대로 남는다. 이게 사실상 이 도메인의 본체다 — 사전
+    (facility_alias 등)이 낡으면 선석 매칭이 틀어진다. `all` 실행 시 다른
+    도메인이 끝난 뒤 마지막에 돌도록 DOMAINS 순서를 유지할 것.
     """
-    # create_mart.py는 저장소 루트에 있다 (python -m 실행 시 루트가 sys.path에 포함됨)
-    from create_mart import build_master_mart
-    from data_pipeline.loaders.mart_pg_loader import load as load_mart
-
-    print("=== [mart] 1/3 통합 마트 생성 ===")
-    build_master_mart()
-    print("=== [mart] 2/3 DB 적재 ===")
-    _load(load_mart)
-    print("=== [mart] 3/3 구체화 뷰 갱신 ===")
+    print("=== [mart] 구체화 뷰 갱신 ===")
     if SKIP_DB:
         print("  - --skip-db: 갱신 건너뜀")
-    else:
-        try:
-            _refresh_materialized_views()
-        except Exception as e:  # noqa: BLE001
-            # 적재는 이미 끝났다. 갱신 실패로 전체를 실패로 만들지 않되,
-            # 조용히 넘기지도 않는다 — 사전이 낡으면 선석 매칭이 틀어진다.
-            print(f"  [WARN] 구체화 뷰 갱신 실패: {e}")
+        return
+    try:
+        _refresh_materialized_views()
+    except Exception as e:  # noqa: BLE001
+        # 갱신 실패로 전체를 실패로 만들지 않되, 조용히 넘기지도 않는다.
+        print(f"  [WARN] 구체화 뷰 갱신 실패: {e}")
 
 
 DOMAINS = {
     "tide": run_tide,
+    "tide_forecast": run_tide_forecast,  # 조위 예보 — 체류 중 최저조 판정의 입력
     "wave": run_wave,
     "weather": run_weather,
     "weather_forecast": run_weather_forecast,

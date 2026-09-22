@@ -98,7 +98,7 @@ SCHEMA_COLUMNS = [
     "port_code", "ptent_yr", "voyage_no", "callsgn", "vessel_name",
     "vessel_type_name", "vessel_nationality_code", "vessel_nationality_name",
     "mrn_no", "bl_no", "master_bl_no", "io_se_code", "io_se_name",
-    "facility_name", "cargo_se_name", "cargo_name_raw", "dg_un_no",
+    "facility_name", "cargo_se_name", "cargo_name_raw", "dg_un_no", "chem_id",
     "cargo_basis", "package_type_name", "unload_method_name",
     "vol_ton_unit_name", "vol_ton", "weight_ton", "vol_size", "weight_size",
     "bulk_vol_size", "bulk_weight_size", "container_count",
@@ -585,15 +585,20 @@ def build_v2(pool):
     """
     liquids = [v for v in pool if v[3]]
     others = [v for v in pool if not v[3]]
-    ordered = liquids + others
-    if not ordered:
-        ordered = [(f"TEST{i:03d}", f"샘플선박{i}", "", i % 3 == 0, True) for i in range(50)]
+    if not liquids and not others:
+        fallback = [(f"TEST{i:03d}", f"샘플선박{i}", "", i % 3 == 0, True) for i in range(50)]
+        liquids = [v for v in fallback if v[3]]
+        others = [v for v in fallback if not v[3]]
 
-    rows, i, seq = [], 0, 1
+    # ① 액체화물선 — **전수** 배정(척당 1~3건).
+    #    [2026-09-16] 여기가 `while len(rows) < TARGET_ROWS:` 였는데 TARGET_ROWS는
+    #    2026-08-15 개정(행 수 목표 -> 선박 커버리지)에서 삭제된 상수라 NameError로
+    #    스크립트 전체가 실행 불가였다. 위 독스트링이 명시한 의도("액체화물선
+    #    전원에게 1~3건을 배정")대로 전수 루프로 고친다 — 목록 순서로 커버리지가
+    #    갈리던 문제도 함께 사라진다.
+    rows, seq = [], 1
     facility_usage: dict[str, int] = {}
-    while len(rows) < TARGET_ROWS:
-        cs, vname, cat, liq, est = ordered[i % len(ordered)]
-        i += 1
+    for cs, vname, cat, liq, est in liquids:
         for _ in range(random.randint(1, 3)):
             cargo, un, _imdg, _pg, basis = pick_cargo(cat, liq, est)
             base_candidates = LIQUID_FACILITIES if un else DRY_FACILITIES
@@ -813,6 +818,106 @@ def enforce_dgl(rows) -> None:
             + (f"\n  ... 외 {len(problems) - 20}건" if len(problems) > 20 else ""))
 
 
+# ---------------------------------------------------------------------------
+# UN 번호 → MSDS chem_id 확정 매핑
+#
+# [2026-09-21] 왜 만들었나 — UN 번호 조인이 두 가지로 깨지고 있었다.
+#
+#   (1) 다대일(fan-out). UN 번호는 화학물질 식별자가 아니라 **운송 분류 코드**라
+#       한 UN 에 여러 물질이 붙는다. mart.cargo_msds 가 UN 으로 LEFT JOIN 하면
+#       매니페스트 588행이 710행으로 불어난다(실측). 게다가 arrival_watcher 는
+#       그중 `LIMIT 1` 로 하나를 집는데 ORDER BY 가 없다 —
+#       UN1993 화물의 안전판정이 '석유'로 갈지 '옥타메틸사이클로테트라실록산'
+#       으로 갈지가 우연에 달려 있었다. 인화점·IMDG등급이 달라 판정이 바뀐다.
+#         UN1993 -> 4개, UN3082 -> 6개, UN3295/1986 -> 4개, UN1268/1307 -> 2개
+#
+#   (2) 원유가 영영 안 붙는다. KOSHA MSDS 는 석유(PETROLEUM, CAS 8002-05-9)에
+#       **UN1993**(총칭 N.O.S.)을 부여했다. 반면 이 생성기는 2026-08-02 정정에서
+#       원유의 고유 엔트리 **UN1267**(PETROLEUM CRUDE OIL)로 바꿨다(모듈 상단
+#       정정이력 참고). 양쪽 다 각자 맞지만 UN 으로는 만나지 않는다.
+#       결과: 원유운반선 20척 전부 chem_id 확보 실패 → arrival_watcher 가
+#       "화물 미식별"로 건너뜀. LNG운반선 2척도 같다(메탄 CAS 74-82-8 미수집).
+#       울산항은 원유항인데 원유선이 자동 추천에서 통째로 빠져 있었다.
+#
+# 그래서 UN 조인을 버리고 **생성 시점에 chem_id 를 못 박는다.** 화물을 고른 쪽이
+# 어느 물질인지 알고 있으므로, 그 지식을 소비 측에서 다시 추측하게 두지 않는다.
+#
+# 값의 근거: mart.msds_flat 전수 조회(2026-09-21). 후보가 둘 이상인 UN 은
+# 아래에 선택 이유를 남긴다. 후보가 하나뿐인 UN 은 기계적 매칭이다.
+# ---------------------------------------------------------------------------
+UN_TO_CHEM_ID: dict[str, str] = {
+    # ── 후보 1개 (기계적 매칭) ────────────────────────────────────────────
+    "1005": "001174",   # 암모니아(무수)
+    "1010": "001167",   # 1,3-부타디엔
+    "1011": "000247",   # 부탄
+    "1077": "002524",   # 프로필렌
+    "1093": "001143",   # 아크릴로니트릴
+    "1114": "001008",   # 벤젠
+    "1202": "000973",   # 디젤 연료
+    "1203": "016420",   # 가솔린
+    "1223": "000756",   # 케로젠
+    "1230": "001151",   # 메틸 알코올(메탄올)
+    "1280": "001162",   # 1,2-에폭시프로판(산화프로필렌)
+    "1294": "001032",   # 톨루엔
+    "1830": "001049",   # 황산
+    "1978": "015420",   # 프로페인
+    "2055": "001027",   # 스티렌
+    "2056": "001041",   # 테트라하이드로푸란
+
+    # ── 후보 2개 이상 — 선택 이유 명시 ────────────────────────────────────
+    # 1268 후보: 001128 스토다드 솔벤트(CAS 8052-41-3) / 016495 러버 솔벤트(8030-30-6)
+    #   둘 다 석유계 혼합용제다. 스토다드 솔벤트가 '석유증류물(기타)'에 대응하는
+    #   표준 엔트리이고 러버 솔벤트는 고무공업용 협의 제품이라 전자를 쓴다.
+    "1268": "001128",
+    # 1307 후보: 000233 p-크실렌(CAS 106-42-3) / 001077 크실렌(CAS 1330-20-7)
+    #   매니페스트의 화물명이 '크실렌'(혼합 이성질체)이다. CAS 1330-20-7 이
+    #   혼합 크실렌이고 106-42-3 은 파라 이성질체 단일 물질이라 전자를 쓴다.
+    "1307": "001077",
+    # 1993 후보: 000751 석유 / 000454 옥타메틸사이클로테트라실록산 /
+    #            000852 에틸리덴 노보르닌 / 002093 뷰틸 뷰틸산
+    #   UN1993 은 N.O.S.(품명 미지정) 총칭 엔트리다. 이 생성기가 UN1993 을
+    #   쓰는 곳은 '선종미상 액체선 폴백'과 '인화성 액체(기타)' 두 가지로, 둘 다
+    #   "석유계 인화성 액체인데 물질이 특정되지 않음"을 뜻한다. KOSHA 자신이
+    #   석유(PETROLEUM)에 UN1993 을 부여했으므로 그 물질을 대표로 쓴다.
+    "1993": "000751",
+
+    # ── UN 으로는 절대 안 붙는 항목 (이 표가 존재하는 진짜 이유) ───────────
+    # 원유. MSDS 에는 '석유(PETROLEUM)' CAS 8002-05-9 로 **존재한다** —
+    # 8002-05-9 는 원유(crude petroleum)의 CAS 다. 다만 KOSHA 가 UN 을 1993 으로
+    # 기록해 UN1267 조인으로는 닿지 않는다. 여기서 직접 이어 준다.
+    "1267": "000751",
+}
+
+# MSDS 151종에 대응 물질이 없는 UN. 조용히 NULL 이 되지 않도록 명시한다.
+# LNG(메탄, CAS 74-82-8)는 수집 대상 169→151 선별에서 빠졌다.
+# 울산항 LNG운반선은 실측 2척으로 물량이 작지만, '없어서 비었다'와
+# '매핑을 안 해서 비었다'는 구분되어야 한다.
+UN_WITHOUT_MSDS: dict[str, str] = {
+    "1972": "메탄(냉동액화)/LNG — CAS 74-82-8 이 MSDS 151종에 없음",
+}
+
+
+def chem_id_for(un_no) -> str:
+    """UN 번호 → chem_id. 매핑이 없으면 빈 문자열.
+
+    표에 없는 UN 이 나오면 조용히 넘기지 않고 경고한다 — 새 화물을 추가하고
+    매핑을 빠뜨리면 그 화물은 안전판정에서 통째로 빠지기 때문이다.
+    """
+    import re
+
+    m = re.search(r"([0-9]{4})", str(un_no or ""))
+    if not m:
+        return ""
+    un = m.group(1)
+    if un in UN_TO_CHEM_ID:
+        return UN_TO_CHEM_ID[un]
+    if un in UN_WITHOUT_MSDS:
+        return ""
+    print(f"  [경고] UN{un} 의 chem_id 매핑이 없습니다 — "
+          f"이 화물은 MSDS 근거 없이 적재됩니다. UN_TO_CHEM_ID 에 추가하세요.")
+    return ""
+
+
 def write_csv(rows, path, columns):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     df = pd.DataFrame(rows)
@@ -825,6 +930,10 @@ def write_csv(rows, path, columns):
     if "dg_un_no" in df.columns:
         df["dg_un_no"] = df["dg_un_no"].apply(
             lambda v: "" if pd.isna(v) else str(v).split(".")[0])
+        # chem_id 는 **최종 확정된 dg_un_no** 에서 파생한다. 위반 주입이
+        # dg_un_no 를 바꾸는 경우(UN번호 누락 위반 등)도 여기서 함께 반영된다 —
+        # make_row 시점에 넣으면 위반 주입 뒤 값이 어긋난다.
+        df["chem_id"] = df["dg_un_no"].apply(chem_id_for)
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return df
 

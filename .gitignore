@@ -7,7 +7,13 @@
 data/raw/*
 data/staging/*
 data/mart/*
+data/state/*
+data/logs/*
 !**/.gitkeep
+
+# 검증·빌드 스크립트가 만드는 리포트(data_pipeline/checks/, upa/build_*.py).
+# 입력 seed 는 올리되 그 결과물은 매 실행마다 바뀌므로 올리지 않는다.
+data/seed/_*.csv
 
 __pycache__/
 *.pyc

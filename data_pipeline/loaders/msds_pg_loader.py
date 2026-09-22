@@ -296,6 +296,21 @@ def run_pg_load(raw_json_path: str | None = None) -> None:
             success_cnt, skip_cnt, error_cnt,
         )
 
+        # 구조화 컬럼 승격 — msds_payload(JSONB)에서 인화점·용기등급·신호어 등을
+        # 꺼내 컬럼으로 올린다. 이 INSERT 문은 기본 컬럼 + payload 만 쓰므로,
+        # 이 단계가 없으면 안전판정이 쓰는 flash_point_celsius 가 전부 NULL 로 남는다.
+        # (원래 Alembic 0007 안에만 있어 1회성이었고, 재수집 때마다 값이 사라졌다 —
+        #  2026-09-13 151종 재수집에서 실제로 재현)
+        from data_pipeline.loaders.msds_structured_backfill import backfill
+
+        filled = backfill(conn)
+        logger.info(
+            "구조화 컬럼 백필 완료 — 인화점(숫자) %d건 / 용기등급 %d건 / 신호어 %d건",
+            filled.get("flash_point_celsius", 0),
+            filled.get("packing_group", 0),
+            filled.get("signal_word", 0),
+        )
+
     except Exception:
         conn.rollback()
         logger.exception("치명적 오류 발생 — 전체 롤백")
