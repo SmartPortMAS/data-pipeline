@@ -109,7 +109,7 @@ def run_weather_forecast() -> None:
     print("=== [weather_forecast] 2/3 전처리 ===")
     preprocess_weather_forecast()
     print("=== [weather_forecast] 3/3 DB 적재 ===")
-    load_weather_forecast()
+    _load(load_weather_forecast)
 
 
 def run_ais(minutes: int = 5) -> None:
