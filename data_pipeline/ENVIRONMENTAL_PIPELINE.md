@@ -102,7 +102,7 @@ pip install -r data_pipeline/requirements.txt
 
 ### .env 파일
 
-`.env.example`(로컬) 또는 `.env.prod.example`(운영 EC2)을 복사하여 `.env`를 만들고 아래 항목을 채운다. 이 레포는 기계마다 `.env` 하나를 읽는다.
+`.env.example`을 복사하여 `.env`를 만들고 아래 항목을 채운다.
 
 ```env
 # 조위 실측 + 조위 예보 (국립해양조사원 공공데이터포탈) — 두 서비스가 같은 키를 쓴다
