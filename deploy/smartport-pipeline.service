@@ -1,0 +1,27 @@
+# systemd 서비스 — 수집 EC2 에서 수집 스케줄러(pipeline_scheduler)를 상시 띄운다.
+# 설치: sudo cp deploy/smartport-pipeline.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable smartport-pipeline
+# 사용자·경로가 다르면 User / WorkingDirectory / ExecStart 를 고친다.
+[Unit]
+Description=SmartPort data-pipeline scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+# 전처리기들이 data/raw/... 상대경로를 쓴다 — 작업 폴더가 레포 루트여야 한다.
+WorkingDirectory=/home/ubuntu/data-pipeline
+# 설정은 스케줄러가 .env 를 직접 읽는다(load_dotenv). EnvironmentFile 은 쓰지 않는다.
+# PYTHONUTF8: 로그·출력에 한글이 섞인다.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+Environment=PYTHONIOENCODING=utf-8
+ExecStart=/home/ubuntu/data-pipeline/.venv/bin/python -m data_pipeline.pipeline_scheduler
+Restart=always
+RestartSec=10
+# 기동 직후 1회 수집(STARTUP_RUN)이 돌고 있을 수 있다 — 끝낼 시간을 준다.
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

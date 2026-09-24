@@ -1,0 +1,60 @@
+# 수집 EC2 자동 배포 — main 에 push(= dev → main PR 머지)되면 돈다.
+#
+# 흐름: CI 검사 → SSH 로 수집 EC2 접속 → deploy/deploy.sh 실행
+#       (git 을 이 커밋으로 맞춤 → pip install → systemctl restart → 기동 유지 확인)
+#
+# 스키마(표·뷰)는 backend Alembic 이 만든다 — 이 배포는 마이그레이션을 하지 않는다.
+# 필요한 설정(Settings → Secrets and variables → Actions)은 deploy/README.md 참고.
+name: Deploy (EC2)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 배포가 겹치면 뒤의 것이 기다린다. 도중에 취소하면 서버가 반쯤 바뀐 상태로 남을 수 있어 취소하지 않는다.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    # 수동 실행 때 다른 브랜치를 골라도 운영에는 main 만 나간다.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH 준비
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # 호스트 키를 고정한다. ssh-keyscan 으로 그때그때 받으면 중간자를 막지 못한다.
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: 배포
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          APP_DIR: ${{ vars.EC2_APP_DIR || '/home/ubuntu/data-pipeline' }}
+          SERVICE: ${{ vars.EC2_SERVICE || 'smartport-pipeline' }}
+          SHA: ${{ github.sha }}
+        # 스크립트는 서버의 옛 체크아웃이 아니라 지금 배포하는 커밋의 것을 stdin 으로 보낸다.
+        run: |
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            "$EC2_USER@$EC2_HOST" \
+            "APP_DIR='$APP_DIR' SERVICE='$SERVICE' SHA='$SHA' bash -s" \
+            < deploy/deploy.sh
