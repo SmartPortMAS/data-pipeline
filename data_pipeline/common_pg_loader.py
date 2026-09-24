@@ -39,7 +39,7 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 
 load_dotenv()
 
@@ -55,6 +55,21 @@ VOLATILE_COLS = ["collected_at_utc", "updated_at_utc", "job_at_utc"]
 
 def get_engine() -> Engine:
     """환경변수에서 PostgreSQL 접속 엔진 생성. 기본값 없음 — 미설정 시 명확히 에러."""
+    return create_engine(_database_url())
+
+
+def pg_conninfo() -> str:
+    """psycopg2.connect() 에 넘길 접속 문자열. get_engine() 과 같은 규칙으로 만든다.
+
+    psycopg2 를 직접 쓰는 스크립트들이 예전엔 각자 POSTGRES_* 를 읽으면서
+    localhost:5433 · 비밀번호까지 기본값으로 박아 두었다. 그러면 운영 서버의 .env 에
+    값이 빠졌을 때 에러 대신 **조용히 엉뚱한 DB 로** 붙는다. 규칙을 여기 하나로 모은다.
+    """
+    return make_url(_database_url()).set(drivername="postgresql").render_as_string(hide_password=False)
+
+
+def _database_url() -> str:
+    """DATABASE_URL 우선, 없으면 POSTGRES_* 5개로 조립. 하나라도 없으면 에러."""
     url = os.getenv("DATABASE_URL")
     if not url:
         required = ["POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"]
@@ -69,7 +84,7 @@ def get_engine() -> Engine:
         pw = os.environ["POSTGRES_PASSWORD"]
         db = os.environ["POSTGRES_DB"]
         url = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
-    return create_engine(url)
+    return url
 
 
 def add_record_uid(df: pd.DataFrame) -> pd.DataFrame:
