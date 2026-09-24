@@ -61,7 +61,6 @@ PORT-MIS 응답 필드 설명 (실제 API 검증 완료 기준):
     (2025.03 추가) dstnEtryptDt : 목적지 입항 예정 일시 (출항 선박에 한함)
 """
 
-import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 import json
@@ -71,6 +70,8 @@ import datetime
 import argparse
 
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import get_with_retry
 
 load_dotenv()
 
@@ -208,11 +209,16 @@ def fetch_vessel_entries(port_code: str, start_date: str, end_date: str) -> list
         query_str = urllib.parse.urlencode({k: v for k, v in params.items() if k != "serviceKey"})
         full_url = f"{BASE_URL}?serviceKey={SERVICE_KEY}&{query_str}"
 
-        try:
-            req = urllib.request.Request(full_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=15) as response:
-                content = response.read()
+        # 네트워크 실패는 재시도 후 예외로 올린다(아래 except 로 삼키지 않는다).
+        # 예전에는 실패한 페이지에서 break 해 "받은 데까지"를 정상처럼 저장했고,
+        # 스케줄러에는 성공으로 남았다. 조회 창이 매 회차 겹치므로 이번 회차를
+        # 통째로 실패 처리해도 다음 회차(10분 뒤)가 같은 구간을 다시 받는다.
+        content = get_with_retry(
+            full_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
+            label=f"PORT-MIS Info5 prtAgCd={port_code} page={page}",
+        ).content
 
+        try:
             root = ET.fromstring(content)
 
             # 응답 결과 코드 확인

@@ -22,12 +22,16 @@ extrSe 는 1=제1고조 · 2=제1저조 · 3=제2고조 · 4=제2저조.
 
 import json
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-import requests
 from dotenv import load_dotenv
+
+# 5xx 재시도와 인증키를 지운 오류 문구는 공통 헬퍼로 옮겼다(2026-09-24).
+# 2026-09-22 새벽 8일 요청 중 5일이 504 였고, 다시 보내면 정상이었다 — 그 관찰이
+# common_http 의 재시도 대상(5xx) 근거 중 하나다.
+from data_pipeline.common_http import get_with_retry
+from data_pipeline.common_http import safe_err as _safe_err
 
 load_dotenv()
 
@@ -48,37 +52,11 @@ ULSAN_STN = {
 DEFAULT_DAYS_AHEAD = 7
 
 
-#: 게이트웨이 5xx 재시도. 1회면 충분하다 — 2026-09-22 새벽 관측에서 8일 요청 중
-#: 5일이 504 였고, 같은 요청을 잠시 뒤 다시 보내면 정상 응답이 왔다. 포털 쪽
-#: 순간 과부하라 간격을 길게 둘 이유는 없고, 하루 8회 호출이라 부하도 아니다.
-_RETRY_5XX_DELAY_SEC = 1.0
-
-
-def _safe_err(exc: Exception) -> str:
-    """로그에 남겨도 되는 실패 문구.
-
-    ★ 예외 문구를 그대로 쓰면 안 된다. requests 의 HTTPError 는 메시지에 **요청
-      URL 전체**를 담는데, 이 API 는 serviceKey 를 쿼리스트링으로 받으므로
-      인증키가 통째로 로그에 남는다. 상태 코드와 예외 이름만 남긴다.
-
-      같은 결함이 backend 에도 있었다(twin.py 가 실패 사유에 httpx 예외 문구를
-      넣어 serviceKey 가 API 응답으로 나갔다). backend 는 이 API 를 직접 부르지
-      않게 되면서 없어졌고, 호출 지점은 이제 여기 하나다.
-    """
-    if isinstance(exc, requests.RequestException):
-        # requests 계열만 URL 을 물고 있다. 상태 코드 + 예외 이름으로 줄인다.
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        return f"HTTP {status} ({type(exc).__name__})" if status else type(exc).__name__
-    # 우리가 만든 문구(resultCode/resultMsg)는 키를 담지 않으므로 그대로 남긴다 —
-    # 여기까지 지워 버리면 "왜 실패했는지"가 로그에서 사라진다.
-    return f"{type(exc).__name__}: {exc}"
-
-
 def fetch_forecast(obs_code: str, req_date: str) -> list:
     """GetTideFcstHghLwApiService 단일 호출 → item 리스트 반환
 
-    5xx 는 한 번 더 시도한다(`_RETRY_5XX_DELAY_SEC`). 4xx·JSON 오류는 다시 물어도
-    같은 답이 오므로 재시도하지 않는다.
+    연결 오류·5xx 는 common_http.get_with_retry 가 재시도한다. 4xx·resultCode 오류는
+    다시 물어도 같은 답이 오므로 재시도하지 않는다.
 
     Args:
         obs_code: 관측소 코드 (예: DT_0020)
@@ -96,15 +74,7 @@ def fetch_forecast(obs_code: str, req_date: str) -> list:
     qs = "&".join(f"{k}={v}" for k, v in params.items())
     url = f"{BASE_URL}?{qs}"
 
-    for attempt in (1, 2):
-        resp = requests.get(url, timeout=15)
-        if resp.status_code >= 500 and attempt == 1:
-            print(f"  [재시도] HTTP {resp.status_code} — {_RETRY_5XX_DELAY_SEC}초 뒤 한 번 더")
-            time.sleep(_RETRY_5XX_DELAY_SEC)
-            continue
-        break
-
-    resp.raise_for_status()
+    resp = get_with_retry(url, timeout=15, label="조석예보 GetTideFcstHghLwApiService")
     body = resp.json()
 
     result_code = body.get("header", {}).get("resultCode", "")
