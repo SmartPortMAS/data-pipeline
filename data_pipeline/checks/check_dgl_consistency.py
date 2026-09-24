@@ -76,7 +76,7 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"[건너뜀] DB 조회 실패 — {type(e).__name__}: {e}")
         print("         mart.msds_flat 이 있는 PostgreSQL 에 연결되어야 한다.")
-        print("         (mart_views.sql 실행 + .env 의 POSTGRES_* 설정 확인)")
+        print("         (backend `alembic upgrade head` + .env 의 POSTGRES_* 설정 확인)")
         _report_unverified()
         return 2
 

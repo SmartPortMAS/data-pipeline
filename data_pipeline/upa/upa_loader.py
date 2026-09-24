@@ -93,7 +93,10 @@ def _replace_cargo_manifest(engine) -> None:
 def load_all(staging_dir: str = "data/staging") -> None:
     """staging 폴더의 모든 UPA staging CSV 를 PostgreSQL 에 적재."""
     _replace_cargo_manifest(get_engine())
-    _load_all(TABLE_MAP, staging_dir=staging_dir)
+    # (2026-09-24) UPA 표 5종은 backend Alembic 0028 이 만든다 — 여기서는 적재만 한다.
+    # 표가 없으면 "backend 에서 alembic upgrade head 먼저" 오류가 난다. 컬럼을 늘리거나
+    # 바꿀 때는 backend 마이그레이션이 먼저다(CSV 에만 새 컬럼이 있으면 INSERT 가 실패한다).
+    _load_all(TABLE_MAP, staging_dir=staging_dir, auto_create=False)
 
 
 if __name__ == "__main__":
