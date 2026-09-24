@@ -30,6 +30,8 @@ import datetime as dt
 import requests
 from dotenv import load_dotenv
 
+from data_pipeline.common_http import safe_err
+
 load_dotenv()
 
 BASE_URL = "http://apis.data.go.kr/B551938"
@@ -129,9 +131,11 @@ class UpaClient:
                 if attempt == self.max_retry:
                     break
                 wait = self._retry_wait(e, attempt)
-                print(f"[RETRY] {endpoint} 시도 {attempt} 실패: {e} -> {wait:.0f}s 후 재시도")
+                print(f"[RETRY] {endpoint} 시도 {attempt} 실패: {safe_err(e)} -> {wait:.0f}s 후 재시도")
                 time.sleep(wait)
-        raise RuntimeError(f"{endpoint} 호출 실패: {last_err}")
+        # 예외 문구를 그대로 쓰면 요청 URL 과 함께 serviceKey 가 로그로 샌다 — safe_err 로 줄이고
+        # 원 예외 연결도 끊는다(traceback 에 따라 나오지 않게).
+        raise RuntimeError(f"{endpoint} 호출 실패: {safe_err(last_err)}") from None
 
     def fetch_all(self, endpoint: str, params: dict = None, num_of_rows: int = 100,
                   max_pages: int = 100) -> list:

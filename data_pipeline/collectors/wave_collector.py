@@ -20,11 +20,11 @@ API: https://apihub.kma.go.kr/api/typ01/url/kma_buoy.php
 
 import json
 import os
-import time
 from datetime import datetime, timedelta, timezone
 
-import requests
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import get_with_retry
 
 load_dotenv()
 
@@ -71,15 +71,10 @@ def fetch_buoy(stn: str = ULSAN_STN, tm: str | None = None,
     if tm:
         params["tm"] = tm
 
-    for attempt in range(retries):
-        try:
-            r = requests.get(BASE_URL, params=params, timeout=timeout)
-            r.raise_for_status()
-            break
-        except requests.exceptions.RequestException:
-            if attempt == retries - 1:
-                raise
-            time.sleep(2 * (attempt + 1))
+    # 재시도는 공통 헬퍼로(2026-09-24). 예전 루프는 마지막 실패에서 requests 예외를
+    # 그대로 올려, 문구에 담긴 요청 URL 과 함께 authKey 가 로그로 샜다.
+    r = get_with_retry(BASE_URL, params=params, timeout=timeout, retries=retries,
+                       label=f"KMA 부이 stn={stn}" + (f" tm={tm}" if tm else ""))
 
     records = []
     for line in r.text.splitlines():

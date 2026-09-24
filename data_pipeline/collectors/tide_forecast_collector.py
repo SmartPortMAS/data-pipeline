@@ -25,8 +25,13 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-import requests
 from dotenv import load_dotenv
+
+# 5xx 재시도와 인증키를 지운 오류 문구는 공통 헬퍼로 옮겼다(2026-09-24).
+# 2026-09-22 새벽 8일 요청 중 5일이 504 였고, 다시 보내면 정상이었다 — 그 관찰이
+# common_http 의 재시도 대상(5xx) 근거 중 하나다.
+from data_pipeline.common_http import get_with_retry
+from data_pipeline.common_http import safe_err as _safe_err
 
 load_dotenv()
 
@@ -50,6 +55,9 @@ DEFAULT_DAYS_AHEAD = 7
 def fetch_forecast(obs_code: str, req_date: str) -> list:
     """GetTideFcstHghLwApiService 단일 호출 → item 리스트 반환
 
+    연결 오류·5xx 는 common_http.get_with_retry 가 재시도한다. 4xx·resultCode 오류는
+    다시 물어도 같은 답이 오므로 재시도하지 않는다.
+
     Args:
         obs_code: 관측소 코드 (예: DT_0020)
         req_date: 요청일자 YYYYMMDD
@@ -64,8 +72,9 @@ def fetch_forecast(obs_code: str, req_date: str) -> list:
     }
     # serviceKey는 이미 URL 인코딩된 값이므로 직접 URL 조합 (tide_collector 와 동일)
     qs = "&".join(f"{k}={v}" for k, v in params.items())
-    resp = requests.get(f"{BASE_URL}?{qs}", timeout=15)
-    resp.raise_for_status()
+    url = f"{BASE_URL}?{qs}"
+
+    resp = get_with_retry(url, timeout=15, label="조석예보 GetTideFcstHghLwApiService")
     body = resp.json()
 
     result_code = body.get("header", {}).get("resultCode", "")
@@ -94,7 +103,8 @@ def collect_tide_forecast_raw(days_ahead: int = DEFAULT_DAYS_AHEAD) -> None:
         try:
             items = fetch_forecast(obs_code=ULSAN_STN["obs_code"], req_date=target)
         except Exception as e:
-            print(f"  [오류] {e}")
+            # 예외 문구를 그대로 찍지 않는다 — serviceKey 가 로그로 샌다(_safe_err).
+            print(f"  [오류] {_safe_err(e)}")
             continue
 
         for item in items:

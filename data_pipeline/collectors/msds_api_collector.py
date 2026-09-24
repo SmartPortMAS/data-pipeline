@@ -16,8 +16,9 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-import requests
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import get_with_retry
 
 load_dotenv()
 
@@ -119,7 +120,7 @@ def _xml_to_items(xml_text: str) -> list:
 
 def fetch_chem_by_cas(cas_no: str) -> dict | None:
     """CAS번호로 정확한 chemId 1건 조회 (searchCnd=1)"""
-    r = requests.get(
+    r = get_with_retry(
         f"{BASE_URL}/getChemList",
         params={
             "serviceKey": API_KEY_DECODED,
@@ -129,15 +130,15 @@ def fetch_chem_by_cas(cas_no: str) -> dict | None:
             "pageNo": 1,
         },
         timeout=10,
+        label="KOSHA MSDS",
     )
-    r.raise_for_status()
     items = _xml_to_items(r.text)
     return items[0] if items else None
 
 
 def fetch_chem_detail(chem_id: str, endpoint: str) -> list:
     """chemId로 특정 섹션 전체 항목 조회 (msdsItemCode별 다건)"""
-    r = requests.get(
+    r = get_with_retry(
         f"{BASE_URL}{endpoint}",
         params={
             "serviceKey": API_KEY_DECODED,
@@ -146,8 +147,8 @@ def fetch_chem_detail(chem_id: str, endpoint: str) -> list:
             "pageNo": 1,
         },
         timeout=10,
+        label="KOSHA MSDS",
     )
-    r.raise_for_status()
     return _xml_to_items(r.text)
 
 

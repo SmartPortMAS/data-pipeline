@@ -32,7 +32,6 @@ import collections
 import datetime as dt
 import json
 import os
-import re
 import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -49,14 +48,6 @@ LIQ_CATEGORY = {
 }
 SEV = {"정상": 0, "하역중단": 1, "이안": 2, "호스분리": 3, "판단불가": 4}
 REPORT_RANK = {"최초": 0, "변경": 1, "최종": 2}
-
-
-def _env(path: str) -> dict:
-    try:
-        text = open(path, encoding="utf-8").read()
-    except OSError:
-        return {}
-    return {k: v.strip().strip('"') for k, v in re.findall(r"^([A-Z0-9_]+)=(.*)$", text, re.M)}
 
 
 def _iso(v):
@@ -114,17 +105,16 @@ def main() -> None:
     import psycopg2
     from neo4j import GraphDatabase
 
-    penv = _env(os.path.join(BASE_DIR, ".env"))
-    benv = _env(os.path.join(ROOT_DIR, "backend", ".env"))
-    os.environ.setdefault("PORT_MIS_API_KEY", penv.get("PORT_MIS_API_KEY", ""))
+    # 접속정보는 전부 data-pipeline/.env 에서 읽는다. 예전엔 Neo4j 만 backend/.env 에서
+    # 읽어서, 수집 EC2 처럼 backend 폴더가 없는 서버에서는 깨지고 두 레포가 서로 다른
+    # Neo4j 를 볼 여지도 있었다. 기본값(localhost 등)은 두지 않는다.
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, ".env"))
     from data_pipeline.collectors import portmis_collector as pm
+    from data_pipeline.common_pg_loader import pg_conninfo
 
     now = dt.datetime.now(KST)
-    pg = psycopg2.connect(
-        host=penv.get("POSTGRES_HOST", "localhost"), port=int(penv.get("POSTGRES_PORT", "5433")),
-        dbname=penv.get("POSTGRES_DB", "smartport"), user=penv.get("POSTGRES_USER", "smartport"),
-        password=penv.get("POSTGRES_PASSWORD", ""),
-    )
+    pg = psycopg2.connect(pg_conninfo())
     q = pg.cursor()
 
     # ── 온산 액체 선석 ──
@@ -152,8 +142,8 @@ def main() -> None:
         return None
 
     drv = GraphDatabase.driver(
-        benv.get("NEO4J_URI", "bolt://localhost:7687"),
-        auth=(benv.get("NEO4J_USER", benv.get("NEO4J_USERNAME", "neo4j")), benv.get("NEO4J_PASSWORD", "")),
+        os.environ["NEO4J_URI"],
+        auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
     )
     with drv.session() as s:
         group_of = {r["w"]: r["g"] for r in s.run("MATCH (b:Berth) RETURN b.wharf_name AS w, b.berth_group AS g")}
