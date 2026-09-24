@@ -45,8 +45,9 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 
-import requests
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import get_with_retry
 
 load_dotenv()
 
@@ -146,8 +147,8 @@ def fetch_forecast(nx: int = ULSAN_PORT_NX, ny: int = ULSAN_PORT_NY) -> list[dic
         "nx": nx,
         "ny": ny,
     }
-    resp = requests.get(BASE_URL, params=params, timeout=15)
-    resp.raise_for_status()
+    resp = get_with_retry(BASE_URL, params=params, timeout=15,
+                          label=f"단기예보 getVilageFcst nx={nx} ny={ny}")
     body = resp.json()
 
     header = body.get("response", {}).get("header", {})

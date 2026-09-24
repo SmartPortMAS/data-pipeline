@@ -8,12 +8,15 @@ upa/upa_loader.py 에서 쓰던 엔진 생성/자동 테이블 생성/UPSERT 로
 인프라 독립적: APScheduler/Lambda/수동 실행 어디서든 함수 호출만 하면 됨.
 
 스키마 소유권 (auto_create 플래그):
-  - auto_create=True  (기본값, UPA 로더): 테이블이 없으면 DataFrame 스키마로 자동 생성.
-    data-pipeline이 스키마를 직접 관리하는 레거시 방식 — 타입 추론이 부정확할 수 있고
-    마이그레이션 이력이 안 남는 단점이 있다. 새 도메인에는 권장하지 않는다.
-  - auto_create=False (AIS/PORTMIS/tide/wave/weather/MSDS): 테이블은 backend(Alembic)가
-    소유한다. 이 모듈은 insert(upsert)만 수행하고, 테이블이 없으면 명확한 에러를 낸다
+  ★ 2026-09-24 결정: 표·뷰 구조는 전부 backend(Alembic)가 만든다. data-pipeline 은
+    적재만 한다. UPA 표 5종(alembic 0028)과 mart 뷰(0029)까지 옮겨서 지금 운영
+    로더는 모두 auto_create=False 다. 새 로더도 auto_create=False 로 쓴다.
+  - auto_create=False: 테이블은 backend(Alembic)가 소유한다. 이 모듈은
+    insert(upsert)만 수행하고, 테이블이 없으면 명확한 에러를 낸다
     (먼저 backend에서 `alembic upgrade head` 실행 필요).
+  - auto_create=True  (기본값, 레거시): 테이블이 없으면 DataFrame 스키마로 자동 생성.
+    타입 추론이 부정확하고 마이그레이션 이력이 안 남는다. 남은 호출처는 폐기된
+    mart_pg_loader(ulsan_vessel_mart, alembic 0027 이 DROP) 뿐이다.
 
 준비:
   pip install sqlalchemy psycopg2-binary pandas
@@ -39,7 +42,7 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 
 load_dotenv()
 
@@ -55,6 +58,21 @@ VOLATILE_COLS = ["collected_at_utc", "updated_at_utc", "job_at_utc"]
 
 def get_engine() -> Engine:
     """환경변수에서 PostgreSQL 접속 엔진 생성. 기본값 없음 — 미설정 시 명확히 에러."""
+    return create_engine(_database_url())
+
+
+def pg_conninfo() -> str:
+    """psycopg2.connect() 에 넘길 접속 문자열. get_engine() 과 같은 규칙으로 만든다.
+
+    psycopg2 를 직접 쓰는 스크립트들이 예전엔 각자 POSTGRES_* 를 읽으면서
+    localhost:5433 · 비밀번호까지 기본값으로 박아 두었다. 그러면 운영 서버의 .env 에
+    값이 빠졌을 때 에러 대신 **조용히 엉뚱한 DB 로** 붙는다. 규칙을 여기 하나로 모은다.
+    """
+    return make_url(_database_url()).set(drivername="postgresql").render_as_string(hide_password=False)
+
+
+def _database_url() -> str:
+    """DATABASE_URL 우선, 없으면 POSTGRES_* 5개로 조립. 하나라도 없으면 에러."""
     url = os.getenv("DATABASE_URL")
     if not url:
         required = ["POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"]
@@ -69,7 +87,7 @@ def get_engine() -> Engine:
         pw = os.environ["POSTGRES_PASSWORD"]
         db = os.environ["POSTGRES_DB"]
         url = f"postgresql+psycopg2://{user}:{pw}@{host}:{port}/{db}"
-    return create_engine(url)
+    return url
 
 
 def add_record_uid(df: pd.DataFrame) -> pd.DataFrame:

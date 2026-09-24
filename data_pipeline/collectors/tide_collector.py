@@ -15,8 +15,9 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
-import requests
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import get_with_retry, safe_err
 
 load_dotenv()
 
@@ -59,8 +60,7 @@ def fetch_recent(obs_code: str, req_date: str | None = None, interval_min: int =
     )
     url = f"{BASE_URL}?{qs}"
 
-    resp = requests.get(url, timeout=15)
-    resp.raise_for_status()
+    resp = get_with_retry(url, timeout=15, label="조위 GetDTRecentApiService")
     body = resp.json()
 
     result_code = body.get("header", {}).get("resultCode", "")
@@ -79,6 +79,7 @@ def collect_tide_raw(days_back: int = 0) -> None:
     now_kst = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=9)
     collected_at_utc = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
+    failed: list[str] = []
     for d in range(days_back + 1):
         target = (now_kst - timedelta(days=d)).strftime("%Y%m%d")
         output_path = os.path.join(RAW_DIR, f"tide_obs_{target}_raw.json")
@@ -91,8 +92,9 @@ def collect_tide_raw(days_back: int = 0) -> None:
                 req_date=target,
                 interval_min=10,
             )
-        except Exception as e:
-            print(f"  [오류] {e}")
+        except Exception as e:  # noqa: BLE001 — 하루가 실패해도 나머지 날짜는 받는다
+            print(f"  [오류] {safe_err(e)}")
+            failed.append(f"{target} {safe_err(e)}")
             continue
 
         for item in items:
@@ -129,6 +131,11 @@ def collect_tide_raw(days_back: int = 0) -> None:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
         print(f"  [저장] {output_path}  (누적 {len(all_data)}건, 신규 {len(new_items)}건)")
+
+    # 예전에는 실패를 출력만 하고 정상 종료해 스케줄러에 성공으로 남았다.
+    # 받은 날짜는 저장한 뒤에 올리므로 부분 성공분은 다음 회차 전처리가 읽는다.
+    if failed:
+        raise RuntimeError("조위 수집 실패: " + "; ".join(failed))
 
 
 if __name__ == "__main__":

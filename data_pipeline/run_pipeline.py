@@ -237,13 +237,12 @@ def _refresh_materialized_views() -> None:
       화면에는 "점유 중인데 여유"로 뜬다 — facility_alias 가 없앴어야 할
       바로 그 오표시가 형태만 바꿔 되살아난다.
 
-      뷰 정의(mart_views.sql)를 다시 실행할 때는 DROP+CREATE 라 자동으로
-      최신이 되지만, 그건 사람이 수동으로 돌리는 작업이다. 매 수집마다
-      SQL 파일을 다시 실행하게 만들 수는 없으므로 여기서 갱신한다.
+      뷰 정의는 (2026-09-24부터) backend Alembic 0029 가 만든다. 구조는 거기서,
+      데이터 갱신(REFRESH)은 여기서 한다.
 
     없는 경우(뷰 미적용 DB)는 조용히 넘어간다 — 파이프라인 적재 자체는
-    이미 끝난 뒤이고, 뷰가 없다는 건 mart_views.sql 을 아직 안 돌렸다는
-    뜻이지 적재 실패가 아니다.
+    이미 끝난 뒤이고, 뷰가 없다는 건 backend 마이그레이션(0029)을 아직 안
+    돌렸다는 뜻이지 적재 실패가 아니다.
     """
     from sqlalchemy import text
 
@@ -255,7 +254,7 @@ def _refresh_materialized_views() -> None:
             "SELECT 1 FROM pg_matviews WHERE schemaname = 'mart' AND matviewname = 'facility_alias'"
         )).scalar()
         if not exists:
-            print("  - mart.facility_alias 없음 — 갱신 건너뜀 (mart_views.sql 미적용 DB)")
+            print("  - mart.facility_alias 없음 — 갱신 건너뜀 (backend `alembic upgrade head` 미적용 DB)")
             return
         conn.execute(text("REFRESH MATERIALIZED VIEW mart.facility_alias"))
         n = conn.execute(text("SELECT count(*) FROM mart.facility_alias")).scalar()
@@ -357,16 +356,20 @@ def main() -> None:
 
     targets = list(DOMAINS.keys()) if args.domain == "all" else [args.domain]
 
+    # 손으로 돌려도 raw 는 남기지 않는다(2026-09-24) — 스케줄러와 같은 규칙.
+    from data_pipeline.raw_cleanup import discard_raw
+
     for name in targets:
         try:
-            if name == "ais":
-                run_ais(minutes=args.minutes)
-            elif name == "portmis":
-                run_portmis(start_date=args.start, end_date=args.end)
-            elif name in LEGACY_DOMAINS:
-                LEGACY_DOMAINS[name]()
-            else:
-                DOMAINS[name]()
+            with discard_raw(name):
+                if name == "ais":
+                    run_ais(minutes=args.minutes)
+                elif name == "portmis":
+                    run_portmis(start_date=args.start, end_date=args.end)
+                elif name in LEGACY_DOMAINS:
+                    LEGACY_DOMAINS[name]()
+                else:
+                    DOMAINS[name]()
         except Exception as e:  # noqa: BLE001
             print(f"[ERROR] {name} 파이프라인 실패: {e}")
             if args.domain != "all":

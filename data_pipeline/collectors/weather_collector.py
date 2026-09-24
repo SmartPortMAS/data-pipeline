@@ -12,8 +12,9 @@ import json
 import os
 from datetime import datetime, timezone, timedelta
 
-import requests
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import get_with_retry
 
 load_dotenv()
 
@@ -32,7 +33,12 @@ STATION = {
 
 
 def fetch_weather_now() -> dict:
-    """항만기상 현재 관측값 조회 (dataType=2: 전항목)"""
+    """항만기상 현재 관측값 조회 (dataType=2: 전항목)
+
+    실패하면 예외를 올린다. 예전에는 {} 를 돌려주고 정상 종료해서, 스케줄러가
+    실패를 성공으로 기록했다 — 과거 조회가 안 되는 API 라 놓친 회차는 영구
+    손실인데 손실 사실조차 남지 않았다(2026-09-24 점검).
+    """
     params = {
         "serviceKey": API_KEY,
         "resultType": "json",
@@ -40,26 +46,18 @@ def fetch_weather_now() -> dict:
         "mmsi": STATION["mmsi"],
         "dataType": "1",
     }
-    try:
-        resp = requests.get(BASE_URL, params=params, timeout=10)
-        resp.raise_for_status()
-        body = resp.json()
+    resp = get_with_retry(BASE_URL, params=params, timeout=10, label="항만기상 openWeatherNow")
+    body = resp.json()
 
-        status = body.get("result", {}).get("status", "")
-        if status != "OK":
-            msg = body.get("result", {}).get("message", "")
-            print(f"  [항만기상 API] status={status} message={msg}")
-            return {}
+    status = body.get("result", {}).get("status", "")
+    if status != "OK":
+        msg = body.get("result", {}).get("message", "")
+        raise RuntimeError(f"항만기상 API status={status} message={msg}")
 
-        records = body.get("result", {}).get("recordset", [])
-        return records[0] if records else {}
-
-    except requests.exceptions.RequestException as e:
-        print(f"  [항만기상 API 오류] {e}")
-        return {}
-    except (KeyError, ValueError) as e:
-        print(f"  [파싱 오류] {e}")
-        return {}
+    records = body.get("result", {}).get("recordset", [])
+    if not records:
+        raise RuntimeError("항만기상 API 응답에 관측값이 없다(recordset 빈 배열)")
+    return records[0]
 
 
 def collect_weather_raw() -> None:
@@ -72,10 +70,6 @@ def collect_weather_raw() -> None:
     print(f"[항만기상 수집] {STATION['mmsi_name']} ({STATION['mmsi']})")
 
     record = fetch_weather_now()
-
-    if not record:
-        print("  -> 데이터 없음")
-        return
 
     obs_time = record.get("DATETIME", "")
     print(f"  -> 관측시각: {obs_time}")

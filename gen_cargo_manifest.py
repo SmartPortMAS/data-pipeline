@@ -77,8 +77,9 @@ OUT_WEATHER = os.path.join(SHARE_DIR, "violation_weather_obs_synthetic.csv")
 DRY_SAMPLE_MIN = 60
 
 # ---------------------------------------------------------------------------
-# 스키마 정본 — mart_views.sql 의 CREATE TABLE upa_cargo_manifest 와 1:1 일치.
-# 컬럼 순서까지 맞춰 두면 적재 시 스키마 불일치가 나지 않는다. (WBS 1.5)
+# 스키마 정본 — (2026-09-24부터) backend alembic 0028(alembic/sql/0028_upa_tables.sql)의
+# upa_cargo_manifest 와 맞춘다. 예전 정본이던 mart_views.sql 의 CREATE TABLE 껍데기는
+# 이관 전 흔적이다. 컬럼 순서까지 맞춰 두면 적재 시 스키마 불일치가 나지 않는다. (WBS 1.5)
 #
 # ★ 2026-08-04 확정 — bzentyCd(업체코드)는 영구 미확보 (멘토 승인, 재추진 없음).
 #   즉 getIntgCagInfo/getInprtCagDclrInfo 는 앞으로도 호출 불가능하다.
@@ -89,7 +90,7 @@ DRY_SAMPLE_MIN = 60
 #     - UPA 화물 API 응답 필드와 1:1 매핑된 스펙이라, 지금 줄였다가 나중에
 #       (수동 화물 신고서 입력 등 대체 경로가 생기면) 다시 늘리는 것보다,
 #       "매핑 자리는 유지하되 값은 영구 NULL"이 더 안전하다.
-#   컬럼을 줄이면 이 파일 + mart_views.sql 의 CREATE TABLE 두 곳을 같이 고치고
+#   컬럼을 줄이면 이 파일 + backend alembic 마이그레이션 두 곳을 같이 고치고
 #   재검증해야 하는데, 실제로 얻는 이득(로직 변화)이 없어 지금 시점엔 손대지
 #   않는다. 컬럼이 왜 비어 있는지 몰라 헷갈리는 게 목적이면, 삭제가 아니라
 #   이 주석으로 답한다.

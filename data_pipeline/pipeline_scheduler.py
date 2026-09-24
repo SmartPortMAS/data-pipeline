@@ -89,6 +89,11 @@
       읽는 곳이 한 곳도 없었고 같은 결합을 mart.* 뷰가 이미 한다 —
       표는 alembic 0027 이 DROP 했다(run_pipeline.run_mart 주석 참고).
 
+  ※ raw 원본은 남기지 않는다(2026-09-24). 각 회차가 끝나면 그 회차가 쓴 raw 파일만
+    지운다 — 이미 있던 파일은 그대로 둔다. data/raw/upa 를 같이 쓰는 vessel ·
+    port_call · upa_master 는 한 번에 하나만 돈다. 그래서 매일 04:20 port_call 이 도는
+    동안 vessel 5분 회차가 밀리거나 건너뛸 수 있다. 근거는 raw_cleanup.py docstring.
+
   ※ MSDS 는 넣지 않았다. 물질 151종 × 16섹션 배치라 몇 분씩 걸리고,
     원천(KOSHA)이 상시 갱신되는 자료가 아니다. 필요할 때 수동 실행한다.
 
@@ -209,10 +214,15 @@ def _resolve(domain: str):
 
 def run_domain(domain: str) -> None:
     """도메인 1회 실행. 실패해도 예외를 밖으로 던지지 않는다(스케줄러 유지)."""
+    from contextlib import nullcontext
+
+    from data_pipeline.raw_cleanup import UPA_DOMAINS, UPA_LOCK, discard_raw
+
     started = time.monotonic()
     logger.info("[%s] 시작", domain)
     try:
-        _resolve(domain)()
+        with (UPA_LOCK if domain in UPA_DOMAINS else nullcontext()), discard_raw(domain):
+            _resolve(domain)()
     except Exception:  # noqa: BLE001
         logger.exception("[%s] 실패 — 직전 raw/staging 유지, 다음 회차 재시도", domain)
     else:
@@ -228,11 +238,15 @@ def _grace_seconds(entry: dict) -> int:
 
 
 def _setup_logging(verbose: bool) -> None:
+    from logging.handlers import RotatingFileHandler
+
     os.makedirs(LOG_DIR, exist_ok=True)
+    # 파일 로그는 10MB x 5개에서 돈다. 예전 FileHandler 는 끝없이 커졌다 — 상시
+    # 도는 운영 EC2 에서는 디스크를 채운다. (systemd 로 돌리면 stdout 은 journald 에도 남는다)
     handlers = [
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(LOG_DIR, "pipeline_scheduler.log"),
-                            encoding="utf-8"),
+        RotatingFileHandler(os.path.join(LOG_DIR, "pipeline_scheduler.log"),
+                            maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"),
     ]
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,

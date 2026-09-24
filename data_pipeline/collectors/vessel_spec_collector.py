@@ -70,12 +70,12 @@ import datetime
 import json
 import os
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 
 from dotenv import load_dotenv
+
+from data_pipeline.common_http import FetchError, get_with_retry
 
 load_dotenv()
 
@@ -143,10 +143,11 @@ def fetch_vessel_spec(clsgn: str) -> tuple[list[dict], str | None]:
     full_url = f"{BASE_URL}?serviceKey={SERVICE_KEY}&{query_str}"
 
     try:
-        req = urllib.request.Request(full_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as response:
-            content = response.read()
-    except urllib.error.URLError as e:
+        content = get_with_retry(
+            full_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=REQUEST_TIMEOUT_SEC,
+            label="선박제원 Info3",
+        ).content
+    except FetchError as e:  # 문구에 URL·인증키가 없다
         return [], f"네트워크 오류: {e}"
 
     try:

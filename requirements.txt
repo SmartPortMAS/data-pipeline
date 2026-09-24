@@ -1,0 +1,12 @@
+# data-pipeline 운영 의존성. 버전은 2026-09-24 로컬 개발 venv(Python 3.10.8)에서 실제로
+# 돌고 있는 값이다. 스케줄러 경로(pipeline_scheduler → run_pipeline 도메인)가 쓰는 것만.
+#   빠진 것: websockets(레거시 AIS 수집기 — LEGACY_DOMAINS), bs4(upa/berth_web_scraper
+#   수동 실행), boto3(cloud_pull — S3 경로 제거). 수동 스크립트를 서버에서 돌릴 때만 따로 설치.
+pandas==2.3.3
+numpy==2.2.6
+SQLAlchemy==2.0.51
+psycopg2-binary==2.9.12
+requests==2.34.2
+python-dotenv==1.2.2
+APScheduler==3.11.3
+neo4j==6.2.0

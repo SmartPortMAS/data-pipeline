@@ -22,6 +22,8 @@ import os
 import psycopg2
 from dotenv import load_dotenv
 
+from data_pipeline.common_pg_loader import pg_conninfo
+
 load_dotenv()
 log = logging.getLogger(__name__)
 
@@ -61,13 +63,8 @@ def _item_expr(section: str, code: str) -> str:
 
 
 def _dsn() -> str:
-    return (
-        f"host={os.getenv('POSTGRES_HOST', 'localhost')} "
-        f"port={os.getenv('POSTGRES_PORT', '5433')} "
-        f"dbname={os.getenv('POSTGRES_DB', 'smartport')} "
-        f"user={os.getenv('POSTGRES_USER', 'smartport')} "
-        f"password={os.getenv('POSTGRES_PASSWORD', 'smartportmas')}"
-    )
+    # 접속 규칙은 common_pg_loader 하나로 — 기본값(localhost·비밀번호)을 두지 않는다.
+    return pg_conninfo()
 
 
 def backfill(conn=None) -> dict:

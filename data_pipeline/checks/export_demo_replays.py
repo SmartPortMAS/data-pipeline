@@ -23,7 +23,6 @@ import collections
 import datetime as dt
 import json
 import os
-import re
 import sys
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,14 +44,6 @@ CASES = [
          headline="표 수심으로는 불가능한데 실제로 접안한 날 — 단정하지 않고 확인을 요청"),
 ]
 SWELL = dict(id="swell-0904-0911", start="2026-08-18", end="2026-09-16", threshold_m=2.0)
-
-
-def _env(path):
-    try:
-        text = open(path, encoding="utf-8").read()
-    except OSError:
-        return {}
-    return {k: v.strip().strip('"') for k, v in re.findall(r"^([A-Z0-9_]+)=(.*)$", text, re.M)}
 
 
 def _level_for_margin(m):
@@ -77,15 +68,13 @@ def main():
 
     import psycopg2
 
-    penv = _env(os.path.join(BASE_DIR, ".env"))
-    os.environ.setdefault("PORT_MIS_API_KEY", penv.get("PORT_MIS_API_KEY", ""))
+    # 접속정보는 data-pipeline/.env 에서 — 기본값(localhost 등)은 두지 않는다.
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(BASE_DIR, ".env"))
     from data_pipeline.collectors import portmis_collector as pm
+    from data_pipeline.common_pg_loader import pg_conninfo
 
-    pg = psycopg2.connect(
-        host=penv.get("POSTGRES_HOST", "localhost"), port=int(penv.get("POSTGRES_PORT", "5433")),
-        dbname=penv.get("POSTGRES_DB", "smartport"), user=penv.get("POSTGRES_USER", "smartport"),
-        password=penv.get("POSTGRES_PASSWORD", ""),
-    )
+    pg = psycopg2.connect(pg_conninfo())
     q = pg.cursor()
     rows = json.load(open(args.rows, encoding="utf-8"))
     q.execute("""SELECT berth_group, stop_wind_ms, unberth_wind_ms, disconnect_wind_ms FROM berth_weather_threshold""")
