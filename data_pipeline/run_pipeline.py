@@ -356,16 +356,20 @@ def main() -> None:
 
     targets = list(DOMAINS.keys()) if args.domain == "all" else [args.domain]
 
+    # 손으로 돌려도 raw 는 남기지 않는다(2026-09-24) — 스케줄러와 같은 규칙.
+    from data_pipeline.raw_cleanup import discard_raw
+
     for name in targets:
         try:
-            if name == "ais":
-                run_ais(minutes=args.minutes)
-            elif name == "portmis":
-                run_portmis(start_date=args.start, end_date=args.end)
-            elif name in LEGACY_DOMAINS:
-                LEGACY_DOMAINS[name]()
-            else:
-                DOMAINS[name]()
+            with discard_raw(name):
+                if name == "ais":
+                    run_ais(minutes=args.minutes)
+                elif name == "portmis":
+                    run_portmis(start_date=args.start, end_date=args.end)
+                elif name in LEGACY_DOMAINS:
+                    LEGACY_DOMAINS[name]()
+                else:
+                    DOMAINS[name]()
         except Exception as e:  # noqa: BLE001
             print(f"[ERROR] {name} 파이프라인 실패: {e}")
             if args.domain != "all":

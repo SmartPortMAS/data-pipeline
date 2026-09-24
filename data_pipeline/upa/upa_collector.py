@@ -171,7 +171,9 @@ class UpaClient:
         돌려준다. 그런데 1) 날짜 스냅샷은 매시 같은 이름으로 덮어써서 S3 에도 하루에
         마지막 실행분 1개만 남았고, 로컬 적재는 PC 가 켜진 시각의 최신본만 받으므로
         PC 가 꺼져 있던 시간의 위치 이력이 영구히 사라졌다(30일 중 13일).
-        시각별 파일은 cloud_pull.py 가 밀린 것까지 순서대로 재생한다.
+        시각별 파일은 cloud_pull.py 가 밀린 것까지 순서대로 재생했다.
+        ※ 2026-09-24 S3·cloud_pull 을 없애면서 호출처(collect_vessel_position)는 끄고,
+          인자는 수동 실행용으로 남겨 둔다.
         파일명 시각은 실행 환경 시간대와 무관하게 UTC 로 고정한다(EC2=UTC, 로컬=KST).
         """
         os.makedirs(RAW_DIR, exist_ok=True)
@@ -201,7 +203,10 @@ class UpaClient:
         ep, prefix = ENDPOINTS["vessel_position"]
         items = self.fetch_all(ep)
         print(f"[COLLECT] 선박위치 {len(items)}건")
-        return self.save_raw(prefix, items, hourly=True)
+        # (2026-09-24) 시각 스냅샷(hourly)을 끈다. PC 가 꺼져 있던 시간을 cloud_pull 이
+        # S3 에서 재생하려고 만든 것인데, 이제 수집 EC2 가 5분마다 RDS 에 바로 적재하고
+        # cloud_pull·S3 경로는 없앴다. 남겨 두면 읽는 곳 없이 raw 만 쌓인다.
+        return self.save_raw(prefix, items)
 
     def collect_berth_facility(self, prt_nm: str = None) -> str:
         ep, prefix = ENDPOINTS["berth_facility"]
