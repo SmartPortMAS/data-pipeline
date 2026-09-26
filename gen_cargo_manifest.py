@@ -137,7 +137,7 @@ SCHEMA_COLUMNS = [
 #      (2026-09-26, load_position_calls) — cargo_basis 에 '입항건=위치(...)' 로 남긴다.
 #   ② 화물 계열 = PORT-MIS 대표화물 코드(ldadngFrghtClCd, HS 2자리 — Port-MIS
 #      이용코드집 p.81·외항선 신고서 작성요령 "대표화물 2자리 code").
-#      코드가 없으면 선종 허용 목록(imdg_dgl.SHIP_KIND_ALLOWED_UN).
+#      코드가 없거나 대응 물질이 없으면(38) 선종 허용 목록(imdg_dgl.SHIP_KIND_ALLOWED_UN).
 #   ③ 액화가스선 ↔ 일반 탱커는 물리적으로 화물을 바꿔 실을 수 없으므로 가스 UN 을 가른다.
 #   ④ 선석 조건 — 부두명은 berth(정본)로 해소한다.
 #        터미널 취급품목(ulsan_terminals.TERMINAL_CARGO_UN, berth.operator_name 으로 연결)
@@ -147,7 +147,12 @@ SCHEMA_COLUMNS = [
 #      한쪽만 액체라고 적은 다목적 부두를 놓치지 않으려고 합집합을 쓴다.
 #   ⑤ 종수 = 1 ~ min(선종 상한, 후보 수) 균등. 상한은 대형선 자료 기준이라
 #      울산 연안선엔 과대할 수 있다 → cargo_basis 에 '종수가정' 으로 남긴다.
-#   ⑥ 후보가 비면 '물질 미특정' 1행(UN 없음) — 지어내지 않는다.
+#   ⑥ 선종(또는 대표화물코드) ∩ 선석 조건이 비면 **선종을 따른다**(2026-09-27).
+#      선종은 그 배가 물리적으로 실을 수 있는 것이고, 선석 분류는 거칠다(실측:
+#      SK1부두 '가스'만, S-OIL3부두 '유류'만 취급으로 돼 있는데 케미칼선이 붙는다).
+#      예전엔 여기서 '물질 미특정'을 만들어 133 입항 건(10%)이 화물 없이 판정불가였다.
+#      cargo_basis 에 '선석분류 충돌→선종 우선' 으로 남긴다.
+#   ⑦ 선종 후보까지 비면 '물질 미특정' 1행(UN 없음) — 지어내지 않는다.
 # ---------------------------------------------------------------------------
 V4_SOURCE_TABLE = "IntgCagInfo(SYNTHETIC v4)"
 WINDOW_DAYS = 30
@@ -161,12 +166,14 @@ HS_FAMILY_UN: dict[str, frozenset] = {
                      "1114", "1294", "1307"}),                        # 2707
     "28": frozenset({"1830", "1005"}),                                # 2807·2814
     "29": frozenset({"1114", "1294", "1307", "2055",                  # 2902
-                     "1230", "1280", "1093", "2056"}),                # 2905·2910·2926·2932
+                     "1230", "1280", "1093", "2056",                  # 2905·2910·2926·2932
+                     "1077", "1010"}),                                # 2901 (프로필렌·부타디엔)
     "38": frozenset(),
 }
 
 GAS_UN = frozenset({"1978", "1011", "1972", "1077", "1010", "1005"})
 GAS_SHIP_KINDS = frozenset({"LPG운반선", "LNG운반선", "케미칼가스운반선"})
+LNG_SHIP_KIND, LNG_UN = "LNG운반선", "1972"
 
 # 선종 허용 목록에 없는 액체 관련 선종. 급유선은 DGL 참조표에 있는 연료유만.
 SHIP_KIND_EXTRA_UN: dict[str, tuple] = {"급유선": ("1202", "1268")}
@@ -568,12 +575,19 @@ def candidates_for(call, wharf, prof):
     """(후보 UN 집합, 근거 문자열들)."""
     kind = _norm(call.ship_kind_category)
     code = _norm(call.cargo_class_code).split(".")[0]
-    if code in HS_FAMILY_UN:
+    # 코드가 있어도 대응 물질이 없으면(38 각종 화학공업생산품) 선종 목록으로 간다 — 규칙 ②
+    if HS_FAMILY_UN.get(code):
         base, why = set(HS_FAMILY_UN[code]), [f"대표화물코드 {code}"]
     else:
         base = set(imdg_dgl.SHIP_KIND_ALLOWED_UN.get(kind, ())) | set(SHIP_KIND_EXTRA_UN.get(kind, ()))
         why = [f"선종({kind or '미상'})"]
     base = (base & GAS_UN) if kind in GAS_SHIP_KINDS else (base - GAS_UN)
+    # LNG(UN1972, 극저온 메탄)는 LNG선만 싣는다. 대표화물코드 27 은 가스 계열 전체라
+    # LPG선·케미칼가스선에도 LNG 가 뽑혔고, LNG 는 MSDS 가 없어 판정불가가 됐다(9/27 실측 3건).
+    if kind != LNG_SHIP_KIND:
+        base.discard(LNG_UN)
+    else:
+        base = {LNG_UN}
     # 급유선은 대표화물코드가 27(광물성연료)이어도 싣는 건 연료유다 — 계열 전체
     # (가솔린·벤젠…)로 넓히면 급유선이 5종을 싣는 비현실적 결과가 나온다(실측).
     if kind in SHIP_KIND_EXTRA_UN:
@@ -591,6 +605,9 @@ def candidates_for(call, wharf, prof):
         cand = base
         if wharf:
             why.append("선석조건 없음")        # 선석 미정은 resolve_wharf 근거가 따로 붙는다
+    if not cand and base and p and (p["terminal"] or p["cats"]):
+        cand = base                             # 규칙 ⑥ — 선석 조건과 충돌하면 선종을 따른다
+        why.append("선석분류 충돌→선종 우선")
     return cand, why
 
 
@@ -639,10 +656,22 @@ def make_call_row(call, wharf, un, parcel_no, n_parcels, basis, rng):
 
 
 def load_frozen_rows():
-    """이미 적재된 v4 행. 이 입항 건들은 다시 뽑지 않는다(처음 본 시점에 고정)."""
+    """이미 적재된 v4 행. 이 입항 건들은 다시 뽑지 않는다(처음 본 시점에 고정).
+
+    [2026-09-27] 단, 화물을 하나도 특정하지 못한 입항 건(모든 행의 chem_id 가 없음 —
+    '물질 미특정'이거나 MSDS 없는 UN)은 고정하지 않는다. 규칙 ⑥(선종 우선)과 LNG 제한을
+    이미 본 입항 건에도 적용하기 위해서다. 화물이 정해진 입항 건은 그대로 둔다.
+    """
     cols = ", ".join(c for c in SCHEMA_COLUMNS if c != "chem_id")
-    df = _read_db(f"SELECT {cols} FROM upa_cargo_manifest WHERE source_table = :st",
-                  {"st": V4_SOURCE_TABLE})
+    df = _read_db(f"""
+        SELECT {cols} FROM upa_cargo_manifest m
+        WHERE source_table = :st
+          AND EXISTS (SELECT 1 FROM upa_cargo_manifest k
+                      WHERE k.source_table = m.source_table
+                        AND k.callsgn = m.callsgn AND k.ptent_yr = m.ptent_yr
+                        AND k.voyage_no = m.voyage_no
+                        AND nullif(btrim(k.chem_id::text), '') IS NOT NULL)
+    """, {"st": V4_SOURCE_TABLE})
     if df is None or df.empty:
         return [], set()
     keys = {call_key(r.callsgn, r.ptent_yr, r.voyage_no) for r in df.itertuples()}
