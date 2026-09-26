@@ -133,6 +133,8 @@ SCHEMA_COLUMNS = [
 #   ① 키 = PORT-MIS 입항 건 (callsgn, entry_year, entry_count).
 #      난수 시드 = 이 키의 해시 → 몇 번 돌려도 같은 입항 건엔 같은 화물.
 #      이미 DB 에 있는 v4 입항 건은 다시 뽑지 않는다(처음 본 시점에 고정).
+#      선박위치(upa_vessel_position)가 먼저 알려 준 항차도 같은 키로 합성한다
+#      (2026-09-26, load_position_calls) — cargo_basis 에 '입항건=위치(...)' 로 남긴다.
 #   ② 화물 계열 = PORT-MIS 대표화물 코드(ldadngFrghtClCd, HS 2자리 — Port-MIS
 #      이용코드집 p.81·외항선 신고서 작성요령 "대표화물 2자리 code").
 #      코드가 없으면 선종 허용 목록(imdg_dgl.SHIP_KIND_ALLOWED_UN).
@@ -428,7 +430,48 @@ def load_calls() -> pd.DataFrame:
     """)
     if df is None:
         raise SystemExit("[중단] PORT-MIS 입항 건을 DB 에서 읽지 못했다 — v4 는 DB 가 필수다.")
+    df["key_src"] = "PORT-MIS"
     return df.sort_values(["cs", "arrival_at_utc"]).reset_index(drop=True)
+
+
+def load_position_calls(pm_keys: set) -> pd.DataFrame:
+    """선박위치(upa_vessel_position)에만 있는 입항 건 — PORT-MIS 에 아직 없는 항차.
+
+    [2026-09-26] 위치 API 의 입항횟수(vyg)는 PORT-MIS 의 입항횟수와 같은 키다(로컬 DB
+    실측: 둘 다 값이 있는 307척 중 279척 일치). 그런데 위치 API 가 새 항차를 먼저
+    알려 주는 경우가 있다(28척, 대부분 +1). 판정은 그 항차 키로 화물을 찾으므로
+    PORT-MIS 입항 건만 합성하면 그 배는 '화물 없음'이 된다.
+
+    선종은 배의 속성이라 항차가 바뀌어도 같다 — 같은 콜사인의 가장 최근 PORT-MIS
+    기록에서 가져온다. 대표화물 코드는 항차마다 다르므로 가져오지 않는다(선종 기준).
+    입항 시각은 위치에 처음 잡힌 시각으로 대신한다. 나중에 PORT-MIS 신고가 들어와도
+    키가 같아 load_frozen_rows 가 고정하므로 화물은 바뀌지 않는다.
+    """
+    pos = _read_db(f"""
+        SELECT upper(btrim(callsgn)) AS cs, ptent_yr::int AS entry_year,
+               voyage_no::int AS entry_count, min(received_at_utc) AS arrival_at_utc
+        FROM upa_vessel_position
+        WHERE received_at_utc >= now() - interval '{WINDOW_DAYS} days'
+          AND nullif(btrim(callsgn), '') IS NOT NULL
+          AND ptent_yr IS NOT NULL AND voyage_no IS NOT NULL
+        GROUP BY 1, 2, 3
+    """)
+    kinds = _read_db("""
+        SELECT DISTINCT ON (upper(btrim(callsgn))) upper(btrim(callsgn)) AS cs, vessel_name,
+               ship_kind_category, is_liquid_cargo_vessel, is_bunkering_vessel
+        FROM portmis_vessel
+        WHERE nullif(btrim(callsgn), '') IS NOT NULL
+        ORDER BY upper(btrim(callsgn)), arrival_at_utc DESC NULLS LAST
+    """)
+    if pos is None or kinds is None or pos.empty:
+        return pd.DataFrame()
+    df = pos.merge(kinds, on="cs", how="inner")
+    df = df[(df["is_liquid_cargo_vessel"] == True) | (df["is_bunkering_vessel"] == True)]  # noqa: E712
+    df = df[[call_key(r.cs, r.entry_year, r.entry_count) not in pm_keys for r in df.itertuples()]]
+    for col in ("cargo_class_code", "arrival_facility_cd", "arrival_facility_sub_code", "arrival_facility_nm"):
+        df[col] = None
+    df["key_src"] = "위치(PORT-MIS 미신고)"
+    return df.reset_index(drop=True)
 
 
 def load_berth_profiles() -> dict:
@@ -608,12 +651,17 @@ def load_frozen_rows():
 
 def build_v4():
     calls = load_calls()
+    pm_keys = {call_key(r.cs, r.entry_year, r.entry_count) for r in calls.itertuples()}
+    pos_calls = load_position_calls(pm_keys)
+    if not pos_calls.empty:
+        calls = pd.concat([calls, pos_calls], ignore_index=True)
     prof = load_berth_profiles()
     fmap_d, alias_d, vts_by_cs = load_facility_resolvers()
     frozen_rows, frozen_keys = load_frozen_rows()
 
     rows, stats = list(frozen_rows), {"calls": 0, "frozen": 0, "new": 0, "unspecified": 0,
-                                      "wharf_src": {}, "family_src": {"code": 0, "shipkind": 0}}
+                                      "wharf_src": {}, "family_src": {"code": 0, "shipkind": 0},
+                                      "key_src": {}}
     for cs, g in calls.groupby("cs", sort=False):
         g = g.sort_values("arrival_at_utc").reset_index(drop=True)
         for i, call in enumerate(g.itertuples()):
@@ -625,7 +673,10 @@ def build_v4():
             nxt = g.loc[i + 1, "arrival_at_utc"] if i + 1 < len(g) else None
             wharf, wsrc = resolve_wharf(call, nxt, fmap_d, alias_d, vts_by_cs)
             stats["wharf_src"][wsrc] = stats["wharf_src"].get(wsrc, 0) + 1
+            stats["key_src"][call.key_src] = stats["key_src"].get(call.key_src, 0) + 1
             cand, why = candidates_for(call, wharf, prof)
+            if call.key_src != "PORT-MIS":
+                why = why + [f"입항건={call.key_src}"]
             stats["family_src"]["code" if why[0].startswith("대표화물코드") else "shipkind"] += 1
             rng = _rng_for(key)
             kind = _norm(call.ship_kind_category)
@@ -1019,6 +1070,7 @@ def run(no_violations=False, dry_run=False, load=False, write_samples=True):
     print(f"  대상 입항 건    : {st['calls']}  (최근 {WINDOW_DAYS}일, 액체화물선·급유선)")
     print(f"    · 기존 고정   : {st['frozen']}   · 신규 생성 : {st['new']}")
     print(f"  선석 근거       : {st['wharf_src']}")
+    print(f"  입항 건 출처    : {st['key_src']}  (신규 생성분 기준)")
     print(f"  화물 계열 근거  : 대표화물코드 {st['family_src']['code']} / 선종 {st['family_src']['shipkind']}")
     print(f"  물질 미특정     : {st['unspecified']} 입항 건")
     print(f"  v4 행           : {len(v4)}  (입항 건당 화물 평균 {per_call.mean():.2f}, 최대 {per_call.max()})")
