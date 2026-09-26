@@ -20,9 +20,7 @@ AIS/PORTMIS/tide/wave/weather 로더와 공유한다 (data_pipeline/loaders/*_pg
 실행:
   python -m data_pipeline.upa.upa_loader
 """
-from sqlalchemy import text
-
-from data_pipeline.common_pg_loader import get_engine, load_all as _load_all
+from data_pipeline.common_pg_loader import load_all as _load_all
 
 # staging 파일명 -> (DB 테이블명, upsert 유니크 키)
 #
@@ -33,8 +31,8 @@ from data_pipeline.common_pg_loader import get_engine, load_all as _load_all
 #   갱신되고, 새 키만 INSERT 된다. (기존 테이블의 과거 중복은 로더가 유니크
 #   인덱스 생성 시점에 최신 1행만 남기고 자동 정리한다)
 #
-# 예외 — upa_cargo_manifest 는 record_uid 유지: 자연키 후보(bl_no 등)가
-# 결측 가능해 유니크 인덱스로 쓸 수 없다. bzentyCd 확보 후 키 확정 예정.
+# upa_cargo_manifest 는 bl_no 키(2026-09-26, backend alembic 0031). 합성 생성기 v4 가
+# bl_no 를 입항 건 키로 결정적으로 만든다(SYN-{콜사인}_{연도}_{횟수}-{순번}).
 TABLE_MAP = {
     # 2026-08 MMSI-First: callsgn → vessel_uid.
     # callsgn 은 결측 가능해 유니크 인덱스에서 NULL 이 서로 다른 값으로 취급되고,
@@ -51,7 +49,7 @@ TABLE_MAP = {
     # "언제 접안했고 언제 이안했는지"가 사라진다 → 이벤트 단위 복합키로 보존한다.
     # (선박별 입항 1건만 필요한 소비자는 DISTINCT ON (port_call_id) 로 쓰면 된다)
     "upa_port_call_stg.csv": ("upa_port_call", ["port_call_id", "comm_count"]),
-    "upa_cargo_manifest_stg.csv": ("upa_cargo_manifest", ["record_uid"]),
+    "upa_cargo_manifest_stg.csv": ("upa_cargo_manifest", ["bl_no"]),
     "upa_berth_facility_stg.csv": ("upa_berth_facility", ["wharf_name"]),
     # (2026-09-20) anchorage_name -> (facility_code, index_no).
     # 정박지 하나가 폴리곤 정점 여러 행으로 오는데(E3 는 41행) 이름을 키로 두면
@@ -63,36 +61,8 @@ TABLE_MAP = {
 }
 
 
-# upa_cargo_manifest는 전 행 is_synthetic=True — 실제로 존재하는 안정적 개체가
-# 아니라 매 실행마다 무작위로 새로 지어내는 "가짜 스냅샷 하나"다(bzentyCd 미확보로
-# 실데이터 수집 불가라 gen_cargo_manifest.py가 대체). record_uid가 행 전체 해시라
-# 내용이 랜덤으로 바뀔 때마다 "새 행"으로 잡혀, UPSERT를 그대로 쓰면 과거 실행분이
-# 안 지워지고 계속 쌓인다(실측: 한 화물명 오탈자 수정 후 재생성했더니 예전 오탈자
-# 행 32건이 새 행과 나란히 남아있었음, 2026-08-17). 그래서 이 표만 예외적으로
-# "적재 전 전체 교체"로 다룬다 — 실제 API 데이터 표(upa_port_call 등)는 자연키
-# UPSERT가 맞으므로 건드리지 않는다.
-#
-# ★ 알려진 한계(2026-08-17, 의도적으로 안 고침): 아래 TRUNCATE는 이 함수 자체의
-# 트랜잭션으로 즉시 커밋되고, 실제 재적재(_load_all)는 그 뒤 별도 트랜잭션에서
-# 일어난다 — 그 사이 짧게 이 표가 비어 있는 창이 생긴다(mart.berth_current_cargo가
-# 그 순간 조회되면 "인접 화물 없음"으로 잘못 읽힐 수 있음). 완전히 없애려면
-# common_pg_loader.upsert_dataframe()이 외부 트랜잭션을 받아써서 TRUNCATE+INSERT를
-# 하나로 묶어야 하는데, 그건 다른 7개 테이블이 같이 쓰는 공용 로더라 범위가 커서
-# 보류함. gen_cargo_manifest.py는 사람이 수동으로만 실행하고(자동 스케줄 없음,
-# run_pipeline.py DOMAINS·upa_scheduler.py 어디에도 없음) 실행 빈도가 낮아
-# 지금은 감수하기로 함.
-def _replace_cargo_manifest(engine) -> None:
-    with engine.begin() as conn:
-        # 신규 환경(첫 실행)에서는 아직 테이블이 없을 수 있다 — TRUNCATE는
-        # DROP TABLE과 달리 IF EXISTS 구문이 없어 존재 여부를 먼저 확인한다.
-        exists = conn.execute(text("SELECT to_regclass('public.upa_cargo_manifest')")).scalar()
-        if exists:
-            conn.execute(text("TRUNCATE TABLE upa_cargo_manifest"))
-
-
 def load_all(staging_dir: str = "data/staging") -> None:
     """staging 폴더의 모든 UPA staging CSV 를 PostgreSQL 에 적재."""
-    _replace_cargo_manifest(get_engine())
     # (2026-09-24) UPA 표 5종은 backend Alembic 0028 이 만든다 — 여기서는 적재만 한다.
     # 표가 없으면 "backend 에서 alembic upgrade head 먼저" 오류가 난다. 컬럼을 늘리거나
     # 바꿀 때는 backend 마이그레이션이 먼저다(CSV 에만 새 컬럼이 있으면 INSERT 가 실패한다).
