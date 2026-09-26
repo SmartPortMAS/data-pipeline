@@ -557,6 +557,55 @@ def _write_batch_to_neo4j(driver, rows: list[dict]) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 상투 문구 정리 (2026-09-27) — 적재 뒤 그래프에 의미 규칙을 적용한다
+#
+# 10항의 "가연성 물질, 환원성 물질" 은 글리콜·알코올·올레핀 MSDS 34종에 한 글자도
+# 다르지 않게 들어 있는 상투 문구다. 정규식이 이걸 '가연성물질 기피'로 등록해 MSDS
+# 충돌 4,285쌍 중 4,178쌍(97.5%)이 이 한 카테고리에서 나왔다(1-도데센↔2-에틸헥산올
+# 배정불가, 연료유↔톨루엔 위험 등 — backend tests/test_eval_safety_pairs_20260927.py).
+#
+# 규칙(25번 문서 Q2 ③):
+#   ① 자기가 속한 카테고리를 기피하는 관계는 버린다(자기모순 — 가연성인데 가연성 기피).
+#   ② '가연성물질' 기피는 기피하는 쪽이 산화제·강산류·과산화물일 때만 남긴다.
+#      가연물과 격렬히 반응하는 건 산화성 물질이다(질산, 진한 황산). 강알칼리는 넣지
+#      않는다 — 특정 유기물에 한정된 반응이고, 가성류 반응은 벌크 축(그룹 5)이 따로 본다.
+#
+# 적재기가 MERGE 만 해서 이미 있는 관계는 적재 단계에서 거를 수 없고, 분류(IS_CLASSIFIED_AS)
+# 가 모두 들어간 뒤에야 판단할 수 있으므로 적재 끝에 그래프에서 지운다. 다시 적재하면
+# 관계가 되살아났다가 같은 규칙으로 다시 지워진다(멱등).
+# ─────────────────────────────────────────────────────────────────────────────
+REACTIVE_AVOIDER_CATEGORIES = ["산화제", "강산류", "과산화물"]
+
+_CYPHER_PRUNE_SELF_CONTRADICTION = """
+MATCH (c:Chemical)-[r:INCOMPATIBLE_WITH]->(m:IncompatibleMaterial)<-[:IS_CLASSIFIED_AS]-(c)
+DELETE r
+RETURN count(r) AS removed
+"""
+
+_CYPHER_PRUNE_BOILERPLATE_FLAMMABLE = """
+MATCH (c:Chemical)-[r:INCOMPATIBLE_WITH]->(:IncompatibleMaterial {name: '가연성물질'})
+WHERE NOT EXISTS {
+    MATCH (c)-[:IS_CLASSIFIED_AS]->(k:IncompatibleMaterial) WHERE k.name IN $reactive
+}
+DELETE r
+RETURN count(r) AS removed
+"""
+
+
+def prune_incompatible_noise(driver) -> tuple[int, int]:
+    """상투 문구로 생긴 INCOMPATIBLE_WITH 를 지운다. (자기모순 삭제 수, 가연성 상투 삭제 수)."""
+    with driver.session(database=NEO4J_DATABASE) as session:
+        self_removed = session.run(_CYPHER_PRUNE_SELF_CONTRADICTION).single()["removed"]
+        boiler_removed = session.run(
+            _CYPHER_PRUNE_BOILERPLATE_FLAMMABLE, reactive=REACTIVE_AVOIDER_CATEGORIES,
+        ).single()["removed"]
+    logger.info(
+        "상투 문구 정리: 자기모순 %d건, '가연성물질' 상투 기피 %d건 삭제", self_removed, boiler_removed,
+    )
+    return self_removed, boiler_removed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 메인 이관 함수 — PostgreSQL Cursor → Neo4j 배치 MERGE
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -703,6 +752,7 @@ def run_neo4j_transfer() -> None:
 
         # ── 이관 실행 ──────────────────────────────────────────────────────
         transfer_msds_to_neo4j(pg_conn, neo4j_driver)
+        prune_incompatible_noise(neo4j_driver)
 
     except ServiceUnavailable as e:
         logger.error("Neo4j 연결 불가: %s", e)
@@ -726,4 +776,14 @@ def run_neo4j_transfer() -> None:
 # 단독 실행 진입점
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    run_neo4j_transfer()
+    import sys
+
+    if "--prune-only" in sys.argv:
+        # 다시 적재하지 않고 지금 그래프에 정리 규칙만 적용한다.
+        _driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        try:
+            prune_incompatible_noise(_driver)
+        finally:
+            _driver.close()
+    else:
+        run_neo4j_transfer()
