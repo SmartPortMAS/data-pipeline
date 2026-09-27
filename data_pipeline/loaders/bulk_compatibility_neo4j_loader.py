@@ -28,7 +28,7 @@ imdg_segregation_loader.py(SEGREGATE, IMDG Code Chapter 7.2 공인 격리표)에
     - [2026-09-27] 백엔드는 양쪽 그룹이 확인된 쌍을 이 축으로 '판정함'으로 본다
       (MSDS '피해야 할 물질'이 대부분 비어 있어서다) — 여기 데이터의 정확도가
       곧 판정 정확도다. 원문과 다르게 넣지 말 것.
-    - CAS_TO_GROUP(121종) 밖의 화학물질은 자동으로 매핑되지 않는다.
+    - CAS_TO_GROUP(143종) 밖의 화학물질은 자동으로 매핑되지 않는다.
 
 외부 의존 라이브러리:
     pip install psycopg2-binary neo4j python-dotenv
@@ -254,6 +254,41 @@ CAS_TO_GROUP: dict[str, tuple[int, str, str]] = {
     "111-69-3": (37, GROUP_TYPE_CARGO, "Nitriles"),  # 아디포니트릴
     "108-03-2": (42, GROUP_TYPE_CARGO, "Nitrocompounds"),  # 1-니트로프로판
     "79-24-3": (42, GROUP_TYPE_CARGO, "Nitrocompounds"),  # 니트로에탄
+    # ── 2026-09-27 그룹 미등재 30종 대조 — 22종 추가 ─────────────────────────
+    # 출처: govinfo CFR-2024-title46-vol5-part150.xml Table 1 (행 단위 파싱).
+    # 근거는 셋 중 하나다 — (CAS) 우리 CAS 가 원문에 있고 "see X" 로 X 를 가리킨다,
+    # (명칭) 원문 명칭이 그대로 있다, (이성질체) 원문이 "(all isomers)"로 묶은 모명칭의
+    # 이성질체다(Appendix II "isomers ... are assigned to the same group").
+    "108-87-2": (31, GROUP_TYPE_CARGO, "Paraffins"),  # 메틸시클로헥산 (명칭 Methylcyclohexane)
+    "27458-94-2": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 아이소노닐 알코올 (이성질체 Nonyl alcohol)
+    "26447-40-5": (12, GROUP_TYPE_REACTIVE, "Isocyanates"),  # MDI 혼합 (이성질체 Diphenylmethane diisocyanate — TDI 26471-62-5 와 같은 처리)
+    "110-19-0": (34, GROUP_TYPE_CARGO, "Esters"),  # 초산 이소부틸 (이성질체 Butyl acetate)
+    "75-65-0": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 삼차-부틸알콜 (명칭 "Butyl alcohol (iso-, n-, sec-, tert-)")
+    "106-46-7": (36, GROUP_TYPE_CARGO, "Halogenated Hydrocarbons"),  # 파라-디클로로벤젠 (이성질체 Dichlorobenzene)
+    "629-73-2": (30, GROUP_TYPE_CARGO, "Olefins"),  # 1-헥사데센 (Olefins (C13+, all isomers))
+    "1120-36-1": (30, GROUP_TYPE_CARGO, "Olefins"),  # 1-테트라데센 (CAS → olefin 항목, Olefins (C13+))
+    "504-60-9": (30, GROUP_TYPE_CARGO, "Olefins"),  # 1,3-펜타디엔 (명칭 1,3-Pentadiene)
+    "110-63-4": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 1,4-부탄디올 (CAS → Butylene glycol)
+    "112-41-4": (30, GROUP_TYPE_CARGO, "Olefins"),  # 1-도데센 (명칭 1-Dodecene)
+    "104-76-7": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 2-에틸헥산올 (CAS → Octanol)
+    "2163-42-0": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 2-메틸-1,3-프로판디올 (명칭 — 원문 CAS 칸은 78-26-2)
+    "10042-59-8": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 2-프로필헵탄올 (이성질체 Decyl alcohol)
+    "67774-74-7": (32, GROUP_TYPE_CARGO, "Aromatic Hydrocarbons"),  # C10-C13 알킬벤젠 (CAS → Alkyl (C9+) benzenes)
+    "27458-92-0": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 아이소트리데칸올 (이성질체 Tridecanol)
+    "27215-95-8": (30, GROUP_TYPE_CARGO, "Olefins"),  # 노넨 (명칭 Nonene (all isomers))
+    "93821-12-6": (30, GROUP_TYPE_CARGO, "Olefins"),  # 알켄 C10-14 (Olefin mixtures (C5-C15))
+    "68213-23-0": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 에톡시화 알콜 C12-18 (Alcohol polyethoxylates)
+    "71060-57-6": (20, GROUP_TYPE_REACTIVE, "Alcohols, Glycols"),  # 에톡시화 알콜 C8-10 (Alcohol polyethoxylates)
+    "115-11-7": (30, GROUP_TYPE_CARGO, "Olefins"),  # 아이소부텐 (이성질체 Butylenes)
+    "68037-01-4": (31, GROUP_TYPE_CARGO, "Paraffins"),  # 1-데센 수소화 호모중합체 = PAO (명칭 Polyalpha olefins)
+    # 넣지 않은 8종 — 원문에 이 물질을 가리키는 항목이 없다. 비슷한 이름으로 채우면
+    # 근거 없는 '판정함'이 된다(이 파일 머리말). MSDS 기준으로 남는다.
+    #   9036-19-5 옥틸페녹시폴리에톡시에탄올(Octyl phenol 21 은 다른 물질)
+    #   9003-11-6 PEG-PPG 공중합체(원문 후보가 20·40 두 그룹으로 갈린다)
+    #   26221-73-8 에텐-옥텐 공중합체 / 68439-57-6 알파올레핀설폰산나트륨 /
+    #   10028-22-5 황산철(Polyferric sulfate 는 다른 물질) / 9003-20-7 폴리비닐아세테이트 /
+    #   63148-62-9 폴리디메틸실록산(원문 항목이 서로를 가리키기만 하고 그룹이 없다) /
+    #   67762-41-8 알코올 C10-16(원문 범위 C8-C11·C12+ 어느 쪽에도 온전히 들지 않는다)
 }
 
 INCOMPATIBLE_GROUP_PAIRS: frozenset[frozenset[int]] = frozenset({
@@ -350,6 +385,7 @@ _EXCEPTION_SAFE: frozenset[frozenset[str]] = frozenset({
     *(frozenset({"1310-73-2", c}) for c in (
         "71-36-3", "64-17-5", "107-21-1", "78-83-1", "67-63-0", "67-56-1", "143-08-8",
         "71-23-8", "57-55-6",
+        "27458-94-2", "27458-92-0",  # 2026-09-27 Isononyl alcohol · Isotridecanol (원문 명칭 그대로)
     )),
     # tert-Dodecanethiol (20) — Caustic soda(50%), Polymethylene polyphenyl isocyanate, TDI
     frozenset({"25103-58-6", "1310-73-2"}),
@@ -358,6 +394,8 @@ _EXCEPTION_SAFE: frozenset[frozenset[str]] = frozenset({
     # Ethylenediamine (7)
     *(frozenset({"107-15-3", c}) for c in (
         "71-36-3", "107-88-0", "64-17-5", "107-21-1", "78-93-3", "108-10-1", "71-23-8", "57-55-6",
+        # 2026-09-27 tert-Butyl alcohol · Isononyl alcohol · Butylene glycol(1,4-부탄디올, Table 1 이 이 항목으로 보낸다)
+        "75-65-0", "27458-94-2", "110-63-4",
     )),
     # Hexamethylenediamine (7) — 에탄올 / 용융·용액 공통으로 n-부탄올·이소부탄올·IPA
     *(frozenset({"124-09-4", c}) for c in ("64-17-5", "71-36-3", "78-83-1", "67-63-0")),
