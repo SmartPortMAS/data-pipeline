@@ -20,7 +20,7 @@ msds_neo4j_loader.py와 동일한 설계 원칙(MERGE 멱등성, UNWIND 배치, 
 │  - Berth         <- upa_berth_facility (함현우 담당 data-pipeline UPA 로더가 │
 │                      이미 적재한 테이블. 이 모듈은 읽기만 한다)             │
 │  - CargoCategory <- handling_cargo_name 콤마 분리 (예: "잡화, 액체화학")   │
-│  - ADJACENT_TO   <- PILOT_ADJACENT_PAIRS 수동 큐레이션 (아래 설명)         │
+│  - ADJACENT_TO   <- 좌표 거리 500m (전체 선석) + PILOT_ADJACENT_PAIRS       │
 └──────────────────────────────────────────────────────────────────────────┘
 
 CargoCategory 노드 이름은 cargo_category_loader.py가 Chemical.cargo_category에
@@ -30,12 +30,14 @@ CargoCategory 노드 이름은 cargo_category_loader.py가 Chemical.cargo_catego
 조회가 가능하다.
 
 알려진 한계 (문서화):
-    - ADJACENT_TO는 좌표 기반 자동 계산이 아니다. 수집된 69개 선석 중 다수가
-      좌표 결측(MISSING_COORDINATE)이고 부두 폴리곤 데이터도 없어 전체 자동
-      인접성 계산은 이번 범위 밖이다. 대신 수행계획서(예상 시나리오, 14p)가
-      지정한 5개 파일럿 선석군(정일1·2, OTK1·2, 현대오일신항1·2, SK5~8,
-      북신항 에너지부두)만 PILOT_ADJACENT_PAIRS에 수동으로 등록했다.
-      나머지 선석은 인접 선석 정보 없이 그래프에만 존재한다.
+    - ADJACENT_TO는 좌표가 있는 전체 선석을 500m로 계산하고(2026-09-27 부터),
+      수행계획서(예상 시나리오, 14p)의 5개 파일럿 선석군 수동 쌍
+      (PILOT_ADJACENT_PAIRS)을 더한다. 좌표가 없는 선석(부이 등 12개)은 수동 쌍에
+      없으면 인접 정보가 없다.
+      [2026-09-27] 예전엔 온산 스코프만 계산해 그 밖 91개 선석 중 83개가 인접
+      관계 0건이었다. 판정은 인접 관계가 없으면 이웃을 보지 않고 '안전'을 내서,
+      판정 대상 '적합·안전' 33척 전부가 이웃을 확인하지 않은 안전이었다
+      (그중 13개 부두는 500m 안에 다른 부두가 있었다).
     - handling_cargo_name이 "잡화"/"컨테이너"/"광석" 등인 비액체 선석도 그대로
       Berth/CargoCategory 노드로 적재된다(스케줄링 에이전트가 액체화학 계열
       3개 카테고리로만 필터링하므로 조회 결과에는 영향 없음).
@@ -129,9 +131,9 @@ ONSAN_BERTH_GROUP_MAP: dict[str, str] = {
     "석유공사부이": "한국석유공사원유부이",
 }
 
-# 온산 MVP가 정의한 온산 스코프(액체화물 12부두 + 부이 3기). 좌표 거리 기반
-# ADJACENT_TO/SUBSTITUTABLE_WITH 자동 계산과 스케줄링 에이전트의 배정 대상
-# 범위(graph_queries._CYPHER_FIND_ELIGIBLE_BERTHS)를 이 범위로 한정할 때 쓴다
+# 온산 MVP가 정의한 온산 스코프(액체화물 12부두 + 부이 3기). 스케줄링 에이전트의
+# 배정 대상 범위(graph_queries._CYPHER_FIND_ELIGIBLE_BERTHS)를 이 범위로 한정할 때
+# 쓴다(ADJACENT_TO 좌표 계산은 2026-09-27 부터 전체 선석)
 # — 울산항 전체 69개 선석 중 무관한 조합(예: 컨테이너부두 vs 벌크부두)까지
 # 계산하지 않기 위함. 이 스코프 밖 선석은 그래프 적재 자체에는 영향 없다.
 #
@@ -408,20 +410,20 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def compute_adjacent_pairs_by_distance(
     batch: list[dict],
     *,
-    scope_wharf_names: set[str] = ONSAN_SCOPE_WHARF_NAMES,
+    scope_wharf_names: set[str] | None = None,
     threshold_m: float = ONSAN_ADJACENCY_THRESHOLD_M,
 ) -> list[dict]:
     """좌표 거리 기반 ADJACENT_TO 쌍을 계산한다 (온산 MVP 이식,
     onsan_mvp/scripts/build_adjacency.py의 haversine 로직).
 
-    PILOT_ADJACENT_PAIRS(수동 큐레이션)를 대체하는 게 아니라 추가한다 — 이 함수는
-    scope_wharf_names로 범위를 한정해서, 울산항 전체 69개 선석 전부에 대해
-    O(n^2) 거리 계산을 하지 않는다. 좌표 결측 선석(S-Oil 부이 2기, 석유공사부이 —
-    해상 계류점이라 안벽 좌표가 없음)은 계산에서 자연히 제외된다.
+    PILOT_ADJACENT_PAIRS(수동 큐레이션)를 대체하는 게 아니라 추가한다.
+    scope_wharf_names 가 None 이면 좌표가 있는 전체 선석을 계산한다(118개라
+    O(n^2) 도 순간이다). 좌표 결측 선석(부이 등 — 해상 계류점이라 안벽 좌표가
+    없음)은 계산에서 자연히 제외된다.
     """
     have_coords = [
         row for row in batch
-        if row["wharf_name"] in scope_wharf_names
+        if (scope_wharf_names is None or row["wharf_name"] in scope_wharf_names)
         and row["latitude"] is not None
         and row["longitude"] is not None
     ]
@@ -479,10 +481,9 @@ def transfer_berths_to_neo4j(pg_conn, neo4j_driver) -> None:
     """upa_berth_facility 전체를 읽어 Berth/CargoCategory/ADJACENT_TO로 적재한다.
 
     ADJACENT_TO는 두 출처를 합친다 — 기존 PILOT_ADJACENT_PAIRS(수행계획서 5개
-    선석군 수동 큐레이션)와, 온산 MVP 이식으로 추가된 좌표 거리 기반 자동 계산
-    (compute_adjacent_pairs_by_distance, ONSAN_SCOPE_WHARF_NAMES 범위 한정).
-    같은 쌍이 겹치면 거리 정보가 있는 쪽을 남긴다. 기존 5개 선석군 데이터는
-    그대로 보존되고(DETACH DELETE 없음), 온산 스코프만 추가된다.
+    선석군 수동 큐레이션)와, 좌표 거리 기반 자동 계산
+    (compute_adjacent_pairs_by_distance, 전체 선석).
+    같은 쌍이 겹치면 거리 정보가 있는 쪽을 남긴다.
     """
     batch = fetch_berth_rows(pg_conn)
     if not batch:

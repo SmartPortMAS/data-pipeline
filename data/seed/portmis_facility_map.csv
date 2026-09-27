@@ -75,7 +75,7 @@ MBG,08,일반부두 08,일반부두,,WHARF,COUNT_MISMATCH,
 MBJ,01,자동차부두 01,자동차부두,자동차부두-1선석,BERTH,AUTO_COUNT_MATCH,
 MBJ,02,자동차부두 02,자동차부두,자동차부두-2선석,BERTH,AUTO_COUNT_MATCH,
 MBJ,03,자동차부두 03,자동차부두,자동차부두-3선석,BERTH,AUTO_COUNT_MATCH,
-MLJ,01,장생포호안,,,KNOWN_GAP,CONFIRMED_NO_SOURCE,UPA 웹 부두현황·공공 API·해수청 시설현황 어디에도 없음. 호안(護岸)이라 안벽 제원 공시 대상이 아닌 것으로 보인다
+MLJ,01,장생포호안,장생포호안,장생포호안,BERTH,AUTO_COUNT_MATCH,
 MDG,01,정일1부두,정일1부두,,WHARF,COUNT_MISMATCH,
 MDG,02,정일2부두,정일2부두,,WHARF,COUNT_MISMATCH,
 MBN,13,정일스톨트헤븐울산신항3부두,정일스톨트헤븐 울산신항3부두,정일스톨트헤븐 울산신항3부두,BERTH,AUTO_COUNT_MATCH,
