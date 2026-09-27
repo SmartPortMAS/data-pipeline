@@ -22,12 +22,13 @@ imdg_segregation_loader.py(SEGREGATE, IMDG Code Chapter 7.2 공인 격리표)에
   파일 하나뿐이다. 수정 후에는 이 로더를 재실행해 그래프를 갱신할 것.
 
 알려진 한계:
-    - 그룹 번호 체계(반응성그룹 1~22/화물그룹 30~43)의 원출처는 미국 해안경비대
-      (USCG) 46 CFR Part 150 계열의 호환성 차트다. 국내에도 한국해사위험물검사원
-      (KOMDI)이 운영하는 "산적케미칼 격리 툴(STBC)"이라는 유사 체계가 실재하나,
-      이 데이터가 STBC의 분류와 수치까지 정확히 일치하는지는 별도로 대조되지
-      않았다 — 참고 신호로만 다룰 것.
-    - 36종 화학물질 커버리지 밖(신규 화학물질)은 자동으로 매핑되지 않는다.
+    - 그룹·차트·예외는 USCG 46 CFR Part 150 원문에서 옮겼다(2026-09-16 CAS 대조,
+      2026-09-27 govinfo XML로 그룹 43종 명칭 재대조·Appendix I 전수 재대조).
+      국내 KOMDI "산적케미칼 격리 툴(STBC)"과는 대조하지 않았다.
+    - [2026-09-27] 백엔드는 양쪽 그룹이 확인된 쌍을 이 축으로 '판정함'으로 본다
+      (MSDS '피해야 할 물질'이 대부분 비어 있어서다) — 여기 데이터의 정확도가
+      곧 판정 정확도다. 원문과 다르게 넣지 말 것.
+    - CAS_TO_GROUP(121종) 밖의 화학물질은 자동으로 매핑되지 않는다.
 
 외부 의존 라이브러리:
     pip install psycopg2-binary neo4j python-dotenv
@@ -329,8 +330,38 @@ INCOMPATIBLE_GROUP_PAIRS: frozenset[frozenset[int]] = frozenset({
 # (a) 차트상 비호환이지만 시험 결과 위험하지 않다고 확인된 조합.
 #     원문: "Acrylonitrile (15) ... Compatible with: Triethanolamine (8)."
 #     기존 데이터가 원문과 정확히 일치함을 확인했다.
+#
+#     ★ 2026-09-27 보완 — govinfo CFR-2024-title46-vol5-part150.xml 의 Appendix I(a)
+#       표를 행 단위로 읽어 우리 121종과 대조했다. 9/16에는 아크릴로니트릴×트리에탄올
+#       아민 1건만 담겨 있어, 원문이 "시험 결과 위험하지 않음"으로 풀어 준 조합까지
+#       그룹 차트대로 막고 있었다(과잉 차단). 둘 다 우리 목록에 있고, 원문 명칭이
+#       우리 물질과 하나로 대응하는 것만 넣었다 — "Ethyl hexanol (Octyl alcohol)"은
+#       옥타놀-1(111-87-5)과 같은 물질인지 확정할 수 없어 넣지 않았다.
+#       원문 조건 "Caustic soda/potash, 50% or less"는 농도 조건이다 — 우리 화물은
+#       농도를 모르므로 이 예외는 50% 이하 수용액 전제로 적용된다.
 _EXCEPTION_SAFE: frozenset[frozenset[str]] = frozenset({
     frozenset({"102-71-6", "107-13-1"}),  # 트리에탄올아민(8) × 아크릴로니트릴(15)
+    frozenset({"67-64-1", "111-40-0"}),   # 아세톤(18) × 디에틸렌트리아민(7)
+    # Caustic potash, 50% or less (5)
+    *(frozenset({"1310-58-3", c}) for c in (
+        "71-36-3", "64-17-5", "107-21-1", "78-83-1", "67-63-0", "67-56-1", "57-55-6",
+    )),
+    # Caustic soda, 50% or less (5)
+    *(frozenset({"1310-73-2", c}) for c in (
+        "71-36-3", "64-17-5", "107-21-1", "78-83-1", "67-63-0", "67-56-1", "143-08-8",
+        "71-23-8", "57-55-6",
+    )),
+    # tert-Dodecanethiol (20) — Caustic soda(50%), Polymethylene polyphenyl isocyanate, TDI
+    frozenset({"25103-58-6", "1310-73-2"}),
+    frozenset({"25103-58-6", "9016-87-9"}),
+    frozenset({"25103-58-6", "26471-62-5"}),
+    # Ethylenediamine (7)
+    *(frozenset({"107-15-3", c}) for c in (
+        "71-36-3", "107-88-0", "64-17-5", "107-21-1", "78-93-3", "108-10-1", "71-23-8", "57-55-6",
+    )),
+    # Hexamethylenediamine (7) — 에탄올 / 용융·용액 공통으로 n-부탄올·이소부탄올·IPA
+    *(frozenset({"124-09-4", c}) for c in ("64-17-5", "71-36-3", "78-83-1", "67-63-0")),
+    frozenset({"57-55-6", "111-40-0"}),   # 1,2-프로필렌글리콜(20) × 디에틸렌트리아민(7)
 })
 # (b) 차트상 호환이지만 위험하다고 확인된 조합.
 #     원문: "Glycol Ethers (Group 40) are not compatible with Acrylonitrile (Group 15)"
@@ -351,6 +382,16 @@ _EXCEPTION_BLOCKED: frozenset[frozenset[str]] = frozenset({
     frozenset({"9082-00-2", "107-13-1"}),
     frozenset({"25791-96-2", "107-13-1"}),
     frozenset({"107-98-2", "107-13-1"}),
+    # ★ 2026-09-27 보완 — 같은 원문 Appendix I(b)에서 우리 121종에 해당하는데
+    #   빠져 있던 조합(과소 차단). 모두 그룹 차트상으로는 호환이라 지금까지 통과했다.
+    #   "Acrylonitrile (15) / Methacrylonitrile (15) is not compatible with Group 5, Caustics."
+    #   "Trichloroethylene (36) is not compatible with Group 5, Caustics."
+    #   "Ethylene dichloride (36) is not compatible with Ethylenediamine (7) ..."
+    #   "Methyl tert-butyl ether (41) is not compatible with Group 1, Non-Oxidizing Mineral Acids."
+    *(frozenset({a, b}) for a in ("107-13-1", "126-98-7", "79-01-6")
+      for b in ("1310-73-2", "1310-58-3")),
+    frozenset({"107-06-2", "107-15-3"}),
+    frozenset({"1634-04-4", "7664-38-2"}),
 })
 
 _GROUP_NAMES: dict[int, tuple[str, str]] = {
@@ -523,6 +564,9 @@ def transfer_bulk_compatibility_to_neo4j(pg_conn, neo4j_driver) -> None:
             [r["chem_id"] for r in group_batch],
         )
         session.execute_write(_tx_set_chemical_group, group_batch)
+        # [2026-09-27] 예외 목록은 원문 대조로 늘고 줄 수 있다 — MERGE만 하면 뺀 예외가
+        # 그래프에 남으므로 전부 지우고 현재 목록으로 다시 만든다.
+        session.run("MATCH ()-[r:BULK_COMPAT_SAFE_EXCEPTION|BULK_COMPAT_BLOCKED_EXCEPTION]->() DELETE r")
         if incompatible_batch:
             session.execute_write(_tx_merge_incompatible_group, incompatible_batch)
         if safe_exception_batch:
