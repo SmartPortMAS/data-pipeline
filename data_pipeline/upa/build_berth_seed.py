@@ -516,7 +516,9 @@ def main() -> None:
 
     berth = pd.DataFrame(rows)
     # 이름 정본 표시. API 와 매칭되면 UPA_API 로 덮인다(아래).
-    berth["name_source"] = "UPA_WEB"
+    # 보충 시드가 이름 출처를 적어 왔으면 그것을 쓴다(예: 장생포호안 — PORT-MIS 표기).
+    berth["name_source"] = (berth["name_source"].fillna("UPA_WEB")
+                            if "name_source" in berth.columns else "UPA_WEB")
     # ★ (fcltCd, fcltSubCd)는 **부두**를 가리킨다(선석이 아니다). 실측 확인:
     #   MDU/1..8 = SK1..SK8부두, MDS/1..3 = S-Oil 1..3부두, MBN/16 = LS MNM 신항부두.
     #   즉 fcltCd 는 부두군(MDU=SK계열, MBN=신항), fcltSubCd 가 그 안의 부두다.
