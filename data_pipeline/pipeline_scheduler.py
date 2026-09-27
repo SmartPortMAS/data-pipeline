@@ -61,6 +61,12 @@
       선석 자동 추천(arrival_watcher, backend 10분 주기)의 입력이므로
       그 주기보다 느리면 추천이 한 사이클씩 밀린다. 10분으로 맞춘다.
 
+  cargo (합성 화물 manifest)       10분
+      외부 API 가 아니라 portmis_vessel 을 읽어 새 입항 건에 화물을 만든다
+      (gen_cargo_manifest.py). 입력인 portmis 와 같은 주기다 — 새 입항 건은 늦어도
+      다음 회차에 화물이 붙는다. 이미 있는 입항 건은 다시 뽑지 않고, bl_no 키 UPSERT 라
+      몇 번 돌아도 행이 늘지 않는다(backend alembic 0031).
+
   weather_forecast (KMA 단기예보) 발표시각 cron (02·05·08·11·14·17·20·23시 + 45분)
       하루 8회 발표다. 그 사이에 다시 불러 봐야 같은 발표분이 온다.
       발표 직후에는 자료가 준비되지 않아 빈 응답이 오므로
@@ -143,6 +149,8 @@ SCHEDULE: list[dict] = [
      "desc": "UPA 선박위치 — updtTm 5분 배치 게시(실측), 게시지연 3.9~12.7분"},
     {"domain": "portmis", "trigger": "interval", "kwargs": {"minutes": 10},
      "desc": "PORT-MIS 입출항신고 — backend arrival_watcher(10분)와 동기"},
+    {"domain": "cargo",   "trigger": "interval", "kwargs": {"minutes": 10},
+     "desc": "합성 화물 — PORT-MIS 새 입항 건에 화물 생성(기존 건은 고정)"},
     {"domain": "tide",    "trigger": "interval", "kwargs": {"minutes": 10},
      "desc": "KHOA 조위 실측 — 관측간격 실측 10분"},
     {"domain": "weather", "trigger": "interval", "kwargs": {"minutes": 10},
@@ -171,7 +179,7 @@ SCHEDULE: list[dict] = [
 ]
 
 # 시작 시 한 번 즉시 돌릴 도메인. 일 1회짜리를 기동 때마다 돌리면 호출량만 늘어난다.
-STARTUP_RUN = ["vessel", "portmis", "tide", "weather", "wave", "weather_forecast"]
+STARTUP_RUN = ["vessel", "portmis", "cargo", "tide", "weather", "wave", "weather_forecast"]
 
 
 # ---------------------------------------------------------------------------
@@ -201,11 +209,27 @@ def _run_upa_master() -> None:
     })
 
 
+def _run_cargo() -> None:
+    """합성 화물 — gen_cargo_manifest --load 와 같다(samples/ 는 쓰지 않는다).
+
+    생성기는 DB·DGL 검증 실패 때 SystemExit 을 던진다. run_domain 은 Exception 만
+    잡으므로 그대로 두면 스케줄러가 통째로 죽는다 → RuntimeError 로 바꿔 넘긴다.
+    """
+    import gen_cargo_manifest
+
+    try:
+        gen_cargo_manifest.run(load=True, write_samples=False)
+    except SystemExit as e:
+        raise RuntimeError(str(e)) from None
+
+
 def _resolve(domain: str):
     from data_pipeline import run_pipeline as rp
 
     if domain == "upa_master":
         return _run_upa_master
+    if domain == "cargo":
+        return _run_cargo
     fn = rp.DOMAINS.get(domain)
     if fn is None:
         raise KeyError(f"알 수 없는 도메인: {domain}")

@@ -159,12 +159,15 @@ def extract_hazard_classes(detail02_data: list[dict]) -> list[str]:
 # - 이 사전이 Graph RAG의 핵심 엔티티 어휘(vocabulary)가 되므로 도메인 전문가와 지속 관리 필요.
 INCOMPATIBLE_KEYWORD_DICT: dict[str, list[str]] = {
     # ── 산/염기류 ────────────────────────────────────────────────────────────
-    "강산류":           [r"강산류?", r"진한\s*산", r"무기\s*산"],
+    # [2026-09-27] "강산화제"의 '강산'에 걸리지 않게 한다(산화제는 아래 항목이 따로 잡는다).
+    "강산류":           [r"강산류", r"강산(?!화)", r"진한\s*산", r"무기\s*산"],
     "강알칼리류":       [r"강알칼리류?", r"강염기류?", r"강한\s*염기"],
     "산화제":           [r"산화제", r"산화성\s*물질", r"산화성\s*가스"],
     "환원제":           [r"환원제", r"환원성\s*물질", r"강\s*환원제"],
     # ── 물/수분 — '물질', '물리' 등 파생어 오탐 방지 ─────────────────────────
-    "물/수분":          [r"물(?!질|리|성|체|론|고|가)", r"수분", r"수증기", r"습기"],
+    # [2026-09-27] '물'은 독립된 단어일 때만 — 예전 패턴은 "혼합물"·"누출물"·"화합물"의
+    # 끝 글자에 걸려, 벤젠·가솔린이 물을 기피하는 것으로 들어갔다(원문 대조).
+    "물/수분":          [r"(?<![가-힣])물(?=[과와 ,·|및이을은에]|$)", r"수분", r"수증기", r"습기"],
     # ── 가연성 ──────────────────────────────────────────────────────────────
     "가연성물질":       [r"가연성\s*물질", r"인화성\s*물질", r"가연물"],
     # ── 할로겐족 ────────────────────────────────────────────────────────────
@@ -184,7 +187,9 @@ INCOMPATIBLE_KEYWORD_DICT: dict[str, list[str]] = {
     # ── 유기물/용제 ─────────────────────────────────────────────────────────
     "유기물":           [r"유기물", r"유기\s*용제", r"유기\s*용매", r"유기\s*화합물"],
     # ── 금속류 ──────────────────────────────────────────────────────────────
-    "금속류":           [r"금속류", r"금속\s*분말", r"구리\b", r"알루미늄\b", r"아연\b", r"철\s*분"],
+    # [2026-09-27] J08 의 단독 "금속"(황산·질산 원문)도 잡는다 — 다른 단어의 일부는 제외.
+    "금속류":           [r"금속류", r"금속\s*분말", r"(?<![가-힣])금속(?=[과와 ,·|및이을은에]|$)",
+                         r"구리\b", r"알루미늄\b", r"아연\b", r"철\s*분"],
     # ── 공기/산소 — '산소화', '산소기' 등 오탐 방지 ──────────────────────────
     "산소/공기":        [r"산소(?!화|기)", r"공기(?!\s*업|청)", r"대기\s*중"],
     # ── 암모니아/아민류 ──────────────────────────────────────────────────────
@@ -196,22 +201,22 @@ INCOMPATIBLE_KEYWORD_DICT: dict[str, list[str]] = {
     "중합반응물질":     [r"중합\s*반응", r"중합\s*촉매", r"퍼옥사이드"],
 }
 
-# detail10 J-prefix 코드 중 "분해시 생성되는 유해물질"은 IncompatibleMaterial
-# 추출 대상에서 제외한다 — 그건 이 물질이 분해되며 만들어내는 것이지 "함께 두면
-# 안 되는 상대 물질"이 아니라 의미가 다르다.
+# detail10 의 J코드는 J02(화학적 안정성 및 유해 반응의 가능성) · J06(피해야 할 조건) ·
+# J08(피해야 할 물질) · J10(분해시 생성되는 유해물질) 넷이다(2026-08-23 실측). 예전엔 J07·J10
+# 만 빼고 나머지를 모두 읽었다(_EXCLUDE_J_PREFIXES) — 2026-09-27 부터 J08 만 읽는다(아래).
+
+# [2026-09-27] 기피 **물질**은 J08('피해야 할 물질')에서만 뽑는다.
 #
-# [2026-08-23 수정] 실제 코드는 J07이 아니라 **J10**이다. KOSHA API가 반환하는
-# detail10의 J코드를 실측하면 J02(화학적 안정성 및 유해 반응의 가능성) ·
-# J06(피해야 할 조건) · J08(피해야 할 물질) · J10(분해시 생성되는 유해물질)
-# 넷뿐이고 **J07은 존재하지 않는다**. 즉 이 목록은 아무것도 걸러내지 못한 채
-# 분해생성물을 그대로 통과시키고 있었다.
-#
-# 현재 적재분에는 실害가 없다 — J10 텍스트가 "자극성, 부식성, 독성 가스" 류라
-# INCOMPATIBLE_KEYWORD_DICT의 어떤 패턴과도 매칭되지 않아, 제외 전후 관계 수가
-# 122건으로 동일했다(36종 전수 실측). 그래서 그래프 재적재는 필요 없다.
-# 다만 KOSHA 원문이 바뀌거나 키워드 사전이 넓어지면 바로 오염되므로 고쳐 둔다.
-# J07은 혹시 다른 화물군에서 쓰일 수 있으니 함께 남긴다.
-_EXCLUDE_J_PREFIXES: tuple[str, ...] = ("J07", "J10")
+# 예전엔 J08 외에 J02(화학적 안정성 및 유해 반응의 가능성)·J06(피해야 할 조건)에서도
+# 뽑았다. 그런데 KOSHA 원문(API 직접 호출로 대조)의 J02 는 물질 목록이 아니라 위험성을
+# 설명하는 정형 문구다 — 151종에 60가지뿐이고, 벤젠·가솔린·메탄올이 같은 문장을 쓴다
+# ("증기는 공기와 폭발성 혼합물을 형성 … 격렬하게 중합반응하여 …"). 여기서 '공기'·'혼합물'의
+# '물'·'중합반응'이 걸려 86종이 '산소/공기'를, 벤젠이 '중합반응물질'을 기피하는 것으로
+# 들어갔다. J06 은 열·스파크 같은 **조건**이다.
+# 그 결과 화물쌍 '양방향판정'의 95%가 '산소/공기'(소속 화물은 액화수소 1종)로만 성립했다.
+# J08 은 151종 중 91종이 '자료없음'이다 — 원천에 없는 정보는 지어내지 않는다. 산적
+# 액체화물 간 혼재 가부는 벌크 호환성 그룹(USCG 46 CFR 150)이 주축이다.
+_INCOMPATIBLE_MATERIAL_CODES: tuple[str, ...] = ("J08",)
 
 # 구체적 물질명 → 상위 카테고리 정규화 테이블
 #
@@ -241,16 +246,17 @@ def extract_incompatible_keywords(detail10_data: list[dict]) -> list[str]:
     detail10 (안정성 및 반응성) 섹션의 data 배열에서 혼재금지 물질 키워드를 추출한다.
 
     처리 로직:
-    1. J 코드(J01~J06, J08 등) 항목의 itemDetail 텍스트를 수집.
-       J07(분해생성물) 계열은 별도 의미를 가지므로 제외.
+    1. J08('피해야 할 물질') 항목의 itemDetail 텍스트만 수집한다(_INCOMPATIBLE_MATERIAL_CODES).
+       J02(유해 반응 가능성)·J06(피해야 할 조건)은 물질 목록이 아니라 정형 위험 문구·조건이라
+       뽑지 않는다(2026-09-27, 위 상수 주석). J07·J10(분해생성물)도 제외.
     2. 수집된 텍스트 전체를 합쳐 INCOMPATIBLE_KEYWORD_DICT의 정규식으로 탐색.
     3. 매칭된 경우 딕셔너리의 표준 노드명(키)을 반환.
     4. 텍스트 문장 전체를 노드화하지 않고, 의미 있는 엔티티만 추출하는 것이 핵심.
 
-    실제 API 응답 예시 (벤젠):
-        {"msdsItemCode": "J01",
-         "itemDetail": "강산류 및 산화제와 접촉 시 격렬히 반응함. 물과 서서히 반응."}
-    → ["강산류", "물/수분", "산화제"]
+    실제 API 응답 예시 (에틸렌 글리콜, KOSHA 원문):
+        {"msdsItemCode": "J08", "itemDetail": "가연성 물질, 환원성 물질|강산, 강산화제"}
+    → ["가연성물질", "강산류", "산화제", "환원제"]
+    (가연성물질은 뒤의 prune_incompatible_noise 가 상투 문구로 걸러낸다)
 
     Graph RAG 활용 예시:
         벤젠-[:INCOMPATIBLE_WITH]->강산류
@@ -272,10 +278,7 @@ def extract_incompatible_keywords(detail10_data: list[dict]) -> list[str]:
         code:   str = (item.get("msdsItemCode") or "").strip()
         detail: str = (item.get("itemDetail")   or "").strip()
 
-        if not code.startswith("J"):
-            continue
-        # 제외 코드(J07 계열) 필터
-        if any(code.startswith(excl) for excl in _EXCLUDE_J_PREFIXES):
+        if code not in _INCOMPATIBLE_MATERIAL_CODES:
             continue
         if detail and detail not in _NULL_VALUES:
             texts.append(detail)
@@ -557,6 +560,55 @@ def _write_batch_to_neo4j(driver, rows: list[dict]) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 상투 문구 정리 (2026-09-27) — 적재 뒤 그래프에 의미 규칙을 적용한다
+#
+# 10항의 "가연성 물질, 환원성 물질" 은 글리콜·알코올·올레핀 MSDS 34종에 한 글자도
+# 다르지 않게 들어 있는 상투 문구다. 정규식이 이걸 '가연성물질 기피'로 등록해 MSDS
+# 충돌 4,285쌍 중 4,178쌍(97.5%)이 이 한 카테고리에서 나왔다(1-도데센↔2-에틸헥산올
+# 배정불가, 연료유↔톨루엔 위험 등 — backend tests/test_eval_safety_pairs_20260927.py).
+#
+# 규칙(25번 문서 Q2 ③):
+#   ① 자기가 속한 카테고리를 기피하는 관계는 버린다(자기모순 — 가연성인데 가연성 기피).
+#   ② '가연성물질' 기피는 기피하는 쪽이 산화제·강산류·과산화물일 때만 남긴다.
+#      가연물과 격렬히 반응하는 건 산화성 물질이다(질산, 진한 황산). 강알칼리는 넣지
+#      않는다 — 특정 유기물에 한정된 반응이고, 가성류 반응은 벌크 축(그룹 5)이 따로 본다.
+#
+# 적재기가 MERGE 만 해서 이미 있는 관계는 적재 단계에서 거를 수 없고, 분류(IS_CLASSIFIED_AS)
+# 가 모두 들어간 뒤에야 판단할 수 있으므로 적재 끝에 그래프에서 지운다. 다시 적재하면
+# 관계가 되살아났다가 같은 규칙으로 다시 지워진다(멱등).
+# ─────────────────────────────────────────────────────────────────────────────
+REACTIVE_AVOIDER_CATEGORIES = ["산화제", "강산류", "과산화물"]
+
+_CYPHER_PRUNE_SELF_CONTRADICTION = """
+MATCH (c:Chemical)-[r:INCOMPATIBLE_WITH]->(m:IncompatibleMaterial)<-[:IS_CLASSIFIED_AS]-(c)
+DELETE r
+RETURN count(r) AS removed
+"""
+
+_CYPHER_PRUNE_BOILERPLATE_FLAMMABLE = """
+MATCH (c:Chemical)-[r:INCOMPATIBLE_WITH]->(:IncompatibleMaterial {name: '가연성물질'})
+WHERE NOT EXISTS {
+    MATCH (c)-[:IS_CLASSIFIED_AS]->(k:IncompatibleMaterial) WHERE k.name IN $reactive
+}
+DELETE r
+RETURN count(r) AS removed
+"""
+
+
+def prune_incompatible_noise(driver) -> tuple[int, int]:
+    """상투 문구로 생긴 INCOMPATIBLE_WITH 를 지운다. (자기모순 삭제 수, 가연성 상투 삭제 수)."""
+    with driver.session(database=NEO4J_DATABASE) as session:
+        self_removed = session.run(_CYPHER_PRUNE_SELF_CONTRADICTION).single()["removed"]
+        boiler_removed = session.run(
+            _CYPHER_PRUNE_BOILERPLATE_FLAMMABLE, reactive=REACTIVE_AVOIDER_CATEGORIES,
+        ).single()["removed"]
+    logger.info(
+        "상투 문구 정리: 자기모순 %d건, '가연성물질' 상투 기피 %d건 삭제", self_removed, boiler_removed,
+    )
+    return self_removed, boiler_removed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 메인 이관 함수 — PostgreSQL Cursor → Neo4j 배치 MERGE
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -576,6 +628,14 @@ def transfer_msds_to_neo4j(
         neo4j_driver:   neo4j.GraphDatabase.driver() 반환 객체.
         batch_size:     Neo4j execute_write 당 처리 레코드 수.
     """
+    # [2026-09-27] INCOMPATIBLE_WITH 는 이 적재기만 만든다. MERGE 만 하면 추출 규칙을 고쳐도
+    # 옛 규칙이 만든 관계가 남으므로, 적재 전에 모두 지우고 다시 만든다(원천은 msds_chemical).
+    with neo4j_driver.session(database=NEO4J_DATABASE) as session:
+        removed = session.run(
+            "MATCH ()-[r:INCOMPATIBLE_WITH]->() DELETE r RETURN count(r) AS n"
+        ).single()["n"]
+    logger.info("기존 INCOMPATIBLE_WITH %d건을 지우고 다시 만든다", removed)
+
     # quality_flag='OK' 인 정상 레코드만 대상 (MISSING_KEY 제외)
     _SELECT_SQL = """
         SELECT
@@ -703,6 +763,7 @@ def run_neo4j_transfer() -> None:
 
         # ── 이관 실행 ──────────────────────────────────────────────────────
         transfer_msds_to_neo4j(pg_conn, neo4j_driver)
+        prune_incompatible_noise(neo4j_driver)
 
     except ServiceUnavailable as e:
         logger.error("Neo4j 연결 불가: %s", e)
@@ -726,4 +787,14 @@ def run_neo4j_transfer() -> None:
 # 단독 실행 진입점
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    run_neo4j_transfer()
+    import sys
+
+    if "--prune-only" in sys.argv:
+        # 다시 적재하지 않고 지금 그래프에 정리 규칙만 적용한다.
+        _driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        try:
+            prune_incompatible_noise(_driver)
+        finally:
+            _driver.close()
+    else:
+        run_neo4j_transfer()
