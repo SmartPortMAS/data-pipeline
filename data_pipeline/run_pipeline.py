@@ -256,7 +256,11 @@ def _refresh_materialized_views() -> None:
         if not exists:
             print("  - mart.facility_alias 없음 — 갱신 건너뜀 (backend `alembic upgrade head` 미적용 DB)")
             return
-        conn.execute(text("REFRESH MATERIALIZED VIEW mart.facility_alias"))
+        # [2026-09-28] CONCURRENTLY — 그냥 REFRESH 는 ACCESS EXCLUSIVE 락을 잡아, 이 뷰를
+        #   읽던 트랜잭션이 끝나길 기다리는 동안 뒤이은 조회까지 전부 줄 세웠다(운영
+        #   backend 커넥션 풀 고갈의 증폭 요인, backend docs/31). 필요한 유니크 인덱스
+        #   idx_facility_alias_source 는 Alembic 0029 가 만든다.
+        conn.execute(text("REFRESH MATERIALIZED VIEW CONCURRENTLY mart.facility_alias"))
         n = conn.execute(text("SELECT count(*) FROM mart.facility_alias")).scalar()
         unmapped = conn.execute(text(
             "SELECT count(*) FROM mart.facility_alias WHERE facility_type = 'UNMAPPED'"
