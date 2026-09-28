@@ -148,6 +148,8 @@ FROM (
 --   부두 명세 수심은 해도기준면 기준이므로 그 시각 가용수심 = 해도수심 + 조위.
 --   조위를 빼먹으면 만조에만 접안 가능한 배를 영구 접안불가로 오판한다.
 --   available_depth_m 이 chart_depth_m 과 항상 같다면 조위가 안 붙은 것이다.
+--   CHECK: 수심이 범위(최소~최대)인 부두에서 최소 수심으론 부족하나 최대 수심으론
+--   충분 — 선석 위치 확인이 필요하다는 뜻이다(0029·0034 뷰 정의).
 SELECT '9. 조위 반영 흘수 판정' AS check_name,
        CASE WHEN rows_total = 0
               THEN 'PASS (접안 중 선박 없음 — 판정 대상 0건)'
@@ -162,7 +164,7 @@ FROM (
            count(*) FILTER (WHERE available_depth_m IS DISTINCT FROM chart_depth_m)
                                                                         AS tide_applied,
            count(*) FILTER (WHERE draught_verdict NOT IN
-                            ('OK', 'MARGINAL', 'NOT_ALLOWED', 'UNKNOWN')) AS bad_verdict
+                            ('OK', 'CHECK', 'MARGINAL', 'NOT_ALLOWED', 'UNKNOWN')) AS bad_verdict
     FROM mart.berth_draught_check
 ) t;
 
