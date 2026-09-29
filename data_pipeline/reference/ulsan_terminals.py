@@ -226,28 +226,48 @@ def estimate_transfer_hours(volume_kl: float, terminal_key: str,
 
 
 # ---------------------------------------------------------------------------
-# 터미널 취급화물 → UN 번호 (imdg_dgl 에 등재된 것만 연결)
-#   브로슈어의 물질명을 우리 DGL 참조표와 이어 붙인다. 이러면 합성 화물의
-#   부두 배정이 추정이 아니라 **실제 터미널 취급품목**에 근거하게 된다.
-#   ※ 브로슈어에 있으나 DGL 미등재인 물질(MEG·MPG·MEA·MEK·A.N·HMD·
-#     Diisocyanate·에틸렌 등)은 의도적으로 비워 둔다. 지어내지 않는다.
+# 터미널 취급 범위 → 화물 대분류(cargo_category_loader 의 원유/유류/액체화학/가스)
+#
+# [2026-09-28] 예전엔 UN 번호 목록(TERMINAL_CARGO_UN)이었다. 그 목록은 브로슈어 물질명
+#   중 **우리 DGL 참조표(약 22 UN)에 있는 것만** 옮긴 것이라(MEG·MPG·MEA·MEK·A.N·HMD·
+#   Diisocyanate·에틸렌 등은 참조표에 없어 비워 둠) 터미널당 2~5종이었다. 제약의 출처가
+#   터미널이 아니라 참조표 크기였다. 브로슈어 원문은 대부분 "…등 액체 케미칼 및 석유류"
+#   처럼 예시 나열이고, 공개 자료상 한국보팍만 해도 아크릴로니트릴·부타디엔·벤젠·톨루엔·
+#   옥탄올·가성소다 등을 취급한다(목록은 3종이었다).
+#   그래서 원문이 말하는 범위를 **대분류 단위**로 옮긴다. 원문이 좁게 적은 곳(현대오일·
+#   울산에너지 = 석유제품·선박연료유, 효성 = 위험물 제4류·에틸렌)은 좁게 둔다.
+#   한계: 물질별 영업허가·탱크 재질 적합성은 자료가 없어 반영하지 못한다(근사).
+#
+#   cats       : 허용 대분류
+#   class3_only: True 면 IMDG Class 3(인화성 액체)만 — 「위험물안전관리법」 제4류 대응
+#   chem_ids   : 대분류와 별개로 원문에 이름이 나온 물질(chem_id)
 # ---------------------------------------------------------------------------
-TERMINAL_CARGO_UN: dict[str, tuple] = {
-    "HYUNDAI_OIL":        ("1202", "1223", "1268"),          # GASOIL, KEROSENE, 석유제품
-    "JEONGIL_STOLTHAVEN": ("1230", "1307", "1202", "1203"),  # Methanol, M.X(자일렌), Gas oil, Gasoline
-    "UTK":                ("1203", "1223", "1202", "1114", "1294"),  # 휘발유·등유·경유·벤젠·톨루엔
-    "TAEYOUNG":           ("1280", "2055", "1307", "1114"),  # Propylene Oxide, Styrene, Xylene, Benzene
-    "VOPAK":              ("1230", "1307", "2055"),          # Methanol, Xylene, Styrene
-    "KPX_GLOBAL":         ("1230", "1993"),                  # 알콜류 + 유독물 포함 광범위
-    "ODFJELL":            ("1268", "1114", "1294"),          # 석유정제·액체화학
-    "ULSAN_ENERGY":       ("1202",),                         # MDO/MGO 계열
-    "HYOSUNG":            ("1993",),                         # 위험물 제4류(인화성 액체) 총칭
-    "ONSAN_TANK":         ("1203", "1202", "1223"),          # GASOLINE, GASOIL, KEROSENE
+TERMINAL_CARGO_SCOPE: dict[str, dict] = {
+    # "FUEL OIL / SLURRY OIL / ULSD / KEROSENE / GASOIL / BASEOIL"
+    "HYUNDAI_OIL":        {"cats": {"유류"}},
+    # "M.X, Methanol, Ethanol, Gas oil, Gasoline, A.N, HMD 등 액체 케미칼 및 석유류"
+    "JEONGIL_STOLTHAVEN": {"cats": {"유류", "액체화학"}},
+    # "석유제품 / 바이오디젤, 바이오중유 등 대체연료 / 에탄올, 벤젠, 톨루엔 등"
+    "UTK":                {"cats": {"유류", "액체화학"}},
+    # "Propylene Oxide, Styrene Monomer, Xylene, Benzene, Ethanol, MPG, MEA, Base oil, MEK 등"
+    "TAEYOUNG":           {"cats": {"유류", "액체화학"}},
+    # "Methanol, Xylene, MEG, Styrene 등 다양한 액체화물과 가스제품"
+    "VOPAK":              {"cats": {"액체화학", "가스"}},
+    # "알콜류, 용제류, MONOMER류, 무기산, 연료유, Diisocyanate 등 … 모든 액체화물"
+    "KPX_GLOBAL":         {"cats": {"유류", "액체화학"}},
+    # "석유 정제 및 액체화학제품류"
+    "ODFJELL":            {"cats": {"유류", "액체화학"}},
+    # "HSFO, LSFO, MDO, MGO 등" — 선박용 연료유만
+    "ULSAN_ENERGY":       {"cats": {"유류"}},
+    # "위험물 제4류, 에틸렌 가스"
+    "HYOSUNG":            {"cats": {"유류", "액체화학"}, "class3_only": True, "chem_ids": {"000045"}},
+    # "GASOLINE, GASOIL, KEROSENE, BIO FUEL OIL, VLSFO, LSMGO, 기타 석유제품 및 액체 케미칼 등"
+    "ONSAN_TANK":         {"cats": {"유류", "액체화학"}},
 }
 
 
-def cargo_un_for_terminal(terminal_key: str) -> tuple:
-    return TERMINAL_CARGO_UN.get(terminal_key, ())
+def cargo_scope_for_terminal(terminal_key: str) -> dict | None:
+    return TERMINAL_CARGO_SCOPE.get(terminal_key)
 
 
 def summary() -> str:
