@@ -972,7 +972,7 @@ def inject_violations(rows):
 # ===========================================================================
 DEMO_CONFLICT_TARGET = 10       # 이웃과 부딪히는 배를 이만큼 유지한다
 DEMO_LIST_PAST_H, DEMO_LIST_AHEAD_H = 12, 72   # 입항 선박 판정 목록 범위(arrivals/upcoming 기본값)
-DEMO_MAX_PER_CHEM = 2           # 한 물질을 주입에 쓰는 최대 횟수 — 같은 원인만 되풀이되지 않게
+DEMO_MAX_PER_CHEM = 2           # 한 물질을 먼저 쓰는 횟수 — 같은 원인만 되풀이되지 않게(모자라면 넘긴다)
 
 
 def _load_demo_graph():
@@ -1084,43 +1084,46 @@ def inject_demo_conflicts(rows, pool):
                 used[_norm(r.get("chem_id"))] = used.get(_norm(r.get("chem_id")), 0) + 1
     # 목록에 보이는 입항 건을 먼저, 그 안에서는 키 해시 순(회차마다 같은 순서)
     order = sorted(targets, key=lambda k: (k not in in_list, hashlib.sha256(k.encode()).hexdigest()))
-    for key in order:
-        if len(flagged) >= DEMO_CONFLICT_TARGET:
-            break
-        if key in flagged or any(_norm(r.get("bl_no")).endswith("-D1") for r in by_key[key]):
-            continue
-        cs, w = targets[key]
-        nb = neighbor_chems(cs, w)
-        base = by_key[key][0]
-        cats = SHIP_KIND_CATS.get(_norm(base.get("vessel_type_name")), frozenset())
-        own = chems(key)
-        rng = _rng_for("DEMO-" + key)
-        options = sorted((x, y) for x, e in pool.items() if e["ship_cat"] in cats and x not in own
-                         for y in nb if clashes(x, y))
-        if not options:
-            continue
-        least = min(used.get(x, 0) for x, _ in options)
-        if least >= DEMO_MAX_PER_CHEM:
-            continue                    # 이 배는 이미 많이 쓴 물질로만 걸린다 — 다른 배에서 고른다
-        x, y = rng.choice([o for o in options if used.get(o[0], 0) == least])
-        used[x] = used.get(x, 0) + 1
-        e = pool[x]
-        wton = round(rng.uniform(500, 30000), 1)
-        row = dict(base)
-        row.update({
-            "bl_no": f"SYN-{key}-D1",
-            "cargo_name_raw": e["name"], "dg_un_no": e["un"], "chem_id": x,
-            "cargo_basis": (f"시연-혼재충돌 — 이웃 {nb[y]} '{pool.get(y, {}).get('name', y)}' 와 "
-                            f"46 CFR 150 그룹 {group[x]}↔{group[y]} 불호환(의도적 주입)"),
-            "vol_ton": wton, "weight_ton": wton,
-            "bulk_vol_size": round(wton * 1.1, 1), "bulk_weight_size": wton,
-            "collected_at_utc": pd.Timestamp.now("UTC").isoformat(),
-            "quality_flag": "OK",
-        })
-        by_key[key].append(row)
-        added.append(row)
-        # 이웃 쪽 배도 이 화물을 이웃으로 보게 되므로 다시 센다
-        flagged = {k for k in targets if is_flagged(k)}
+    # [2026-09-29] 한도 안에서 먼저 채우고, 모자라면 한도를 넘겨서라도 목표까지 채운다.
+    # 운영(9/29)은 질산·황산이 한도에 걸려 8척에서 멈췄다 — 걸릴 수 있는 배가 그 물질로만 걸렸다.
+    for cap in (DEMO_MAX_PER_CHEM, None):
+        for key in order:
+            if len(flagged) >= DEMO_CONFLICT_TARGET:
+                break
+            if key in flagged or any(_norm(r.get("bl_no")).endswith("-D1") for r in by_key[key]):
+                continue
+            cs, w = targets[key]
+            nb = neighbor_chems(cs, w)
+            base = by_key[key][0]
+            cats = SHIP_KIND_CATS.get(_norm(base.get("vessel_type_name")), frozenset())
+            own = chems(key)
+            rng = _rng_for("DEMO-" + key)
+            options = sorted((x, y) for x, e in pool.items() if e["ship_cat"] in cats and x not in own
+                             for y in nb if clashes(x, y))
+            if not options:
+                continue
+            least = min(used.get(x, 0) for x, _ in options)
+            if cap is not None and least >= cap:
+                continue                    # 이 배는 이미 많이 쓴 물질로만 걸린다 — 다른 배에서 먼저 고른다
+            x, y = rng.choice([o for o in options if used.get(o[0], 0) == least])
+            used[x] = used.get(x, 0) + 1
+            e = pool[x]
+            wton = round(rng.uniform(500, 30000), 1)
+            row = dict(base)
+            row.update({
+                "bl_no": f"SYN-{key}-D1",
+                "cargo_name_raw": e["name"], "dg_un_no": e["un"], "chem_id": x,
+                "cargo_basis": (f"시연-혼재충돌 — 이웃 {nb[y]} '{pool.get(y, {}).get('name', y)}' 와 "
+                                f"46 CFR 150 그룹 {group[x]}↔{group[y]} 불호환(의도적 주입)"),
+                "vol_ton": wton, "weight_ton": wton,
+                "bulk_vol_size": round(wton * 1.1, 1), "bulk_weight_size": wton,
+                "collected_at_utc": pd.Timestamp.now("UTC").isoformat(),
+                "quality_flag": "OK",
+            })
+            by_key[key].append(row)
+            added.append(row)
+            # 이웃 쪽 배도 이 화물을 이웃으로 보게 되므로 다시 센다
+            flagged = {k for k in targets if is_flagged(k)}
     return added, len(flagged)
 
 
