@@ -135,12 +135,14 @@ SCHEMA_COLUMNS = [
 #      이미 DB 에 있는 v4 입항 건은 다시 뽑지 않는다(처음 본 시점에 고정).
 #      선박위치(upa_vessel_position)가 먼저 알려 준 항차도 같은 키로 합성한다
 #      (2026-09-26, load_position_calls) — cargo_basis 에 '입항건=위치(...)' 로 남긴다.
-#   ② 화물 계열 = PORT-MIS 대표화물 코드(ldadngFrghtClCd, HS 2자리 — Port-MIS
-#      이용코드집 p.81·외항선 신고서 작성요령 "대표화물 2자리 code").
-#      코드가 없거나 대응 물질이 없으면(38) 선종 허용 목록(imdg_dgl.SHIP_KIND_ALLOWED_UN).
-#   ③ 액화가스선 ↔ 일반 탱커는 물리적으로 화물을 바꿔 실을 수 없으므로 가스 UN 을 가른다.
+#   ② 후보 물질 = MSDS 중 UN 번호와 화물 대분류가 있는 물질 전부(load_cargo_pool, 2026-09-28).
+#      선종이 실을 수 있는 대분류(SHIP_KIND_CATS)로 먼저 거르고, PORT-MIS 대표화물
+#      코드(ldadngFrghtClCd, HS 2자리 — Port-MIS 이용코드집 p.81)가 있으면 그 계열로
+#      더 좁힌다. 좁힌 결과가 비면 선종을 따른다(선종 = 물리적으로 실을 수 있는 것).
+#   ③ 액화가스선 ↔ 일반 탱커는 물리적으로 화물을 바꿔 실을 수 없으므로 IMDG Class 2
+#      (가스) 물질을 가른다. 대분류가 '액체화학'이어도 Class 2 면 가스선 화물이다(부타디엔 등).
 #   ④ 선석 조건 — 부두명은 berth(정본)로 해소한다.
-#        터미널 취급품목(ulsan_terminals.TERMINAL_CARGO_UN, berth.operator_name 으로 연결)
+#        터미널 취급 범위(ulsan_terminals.TERMINAL_CARGO_SCOPE, berth.operator_name 으로 연결)
 #        > 액체 취급 분류(berth 의 주요취급화물 텍스트 ∪ upa_berth_facility 분류)
 #        > 선석 미정/비액체 부두면 조건 없음.
 #      두 원천이 자주 어긋난다(UTK 신항부두: berth '목재, 펄프' / UPA '액체화학').
@@ -157,34 +159,44 @@ SCHEMA_COLUMNS = [
 V4_SOURCE_TABLE = "IntgCagInfo(SYNTHETIC v4)"
 WINDOW_DAYS = 30
 
-# HS 2자리 대표화물 코드 → DGL 참조표 UN. 호(4자리) 배정은 코드집 p.89~92 품명 기준
-# (예: 벤젠·톨루엔·크실렌은 2707 벤조올·톨루올·크실올 과 2902 환식탄화수소 양쪽).
-# 38(각종 화학공업생산품)은 DGL 참조표에 대응 물질이 없어 비워 둔다.
-HS_FAMILY_UN: dict[str, frozenset] = {
-    "27": frozenset({"1267", "1202", "1203", "1223", "1268",          # 2709·2710
-                     "1978", "1011", "1972", "1077", "1010",          # 2711
-                     "1114", "1294", "1307"}),                        # 2707
-    "28": frozenset({"1830", "1005"}),                                # 2807·2814
-    "29": frozenset({"1114", "1294", "1307", "2055",                  # 2902
-                     "1230", "1280", "1093", "2056",                  # 2905·2910·2926·2932
-                     "1077", "1010"}),                                # 2901 (프로필렌·부타디엔)
-    "38": frozenset(),
+# 선종 → 실을 수 있는 화물 대분류(cargo_category_loader.CARGO_CATEGORIES 와 같은 이름).
+# 가스선의 '가스'는 대분류가 아니라 IMDG Class 2 로 가른다(규칙 ③, _ship_cat).
+# 목록에 없는 선종은 후보가 없다 → '물질 미특정'(규칙 ⑦).
+SHIP_KIND_CATS: dict[str, frozenset] = {
+    "원유운반선": frozenset({"원유"}),
+    "석유제품운반선": frozenset({"유류"}),
+    "석유제품/케미칼겸용": frozenset({"유류", "액체화학"}),
+    "케미칼운반선": frozenset({"액체화학"}),
+    "기타유조선": frozenset({"유류"}),
+    "LPG운반선": frozenset({"가스"}),
+    "케미칼가스운반선": frozenset({"가스"}),
 }
-
-GAS_UN = frozenset({"1978", "1011", "1972", "1077", "1010", "1005"})
 GAS_SHIP_KINDS = frozenset({"LPG운반선", "LNG운반선", "케미칼가스운반선"})
 LNG_SHIP_KIND, LNG_UN = "LNG운반선", "1972"
+# 에틸렌(-104℃ 완전냉동)은 에틸렌 운반 설비가 있는 케미칼가스선만 싣는다고 본다 [가정].
+ETHYLENE_CHEM_ID = "000045"
+# 벌크 선박 화물이 아닌 가스 — 수소(UN1049)·압축 메탄(UN1971).
+NON_BULK_CHEM_IDS = frozenset({"000557", "015390"})
+# 급유선은 선박연료만 — 디젤 연료·스토다드 솔벤트(예전 UN1202·1268 과 같은 물질).
+BUNKER_KIND, BUNKER_CHEM_IDS = "급유선", frozenset({"000973", "001128"})
 
-# 선종 허용 목록에 없는 액체 관련 선종. 급유선은 DGL 참조표에 있는 연료유만.
-SHIP_KIND_EXTRA_UN: dict[str, tuple] = {"급유선": ("1202", "1268")}
-
-# 선석 액체 취급 분류 → UN. 키워드는 berth(웹 '주요취급화물')와 UPA 분류 양쪽 표기.
-BERTH_CATEGORY_UN: dict[str, frozenset] = {
-    "원유": frozenset({"1267"}),
-    "유류": frozenset({"1202", "1203", "1223", "1268", "1993"}),
-    "액체화학": frozenset({"1114", "1294", "1093", "1230", "1280", "1307", "2055", "2056", "1830"}),
-    "가스": frozenset({"1978", "1011", "1972", "1077", "1010", "1005"}),
+# HS 2자리 대표화물 코드 → 계열(대분류 / 개별 물질). 호(4자리)는 코드집 p.89~92 품명 기준.
+#   27 광물성연료 — 2709 원유·2710 석유제품·2711 석유가스 + 2707 벤조올·톨루올·크실올
+#   28 무기화학품 — 후보 중 무기물은 황산(2807)·질산(2808)·암모니아(2814) 뿐
+#   29 유기화학품 — 액체화학 전반
+#   38 등 그 밖 — 계열로 좁히지 않는다(선종만)
+HS_FAMILY: dict[str, dict] = {
+    "27": {"cats": {"유류", "원유", "가스"}, "chem_ids": {"001008", "001032", "001077", "000233"}},
+    "28": {"cats": set(), "chem_ids": {"001049", "001052", "001174"}},
+    "29": {"cats": {"액체화학"}, "chem_ids": set()},
 }
+HS_INORGANIC_CHEM_IDS = HS_FAMILY["28"]["chem_ids"]
+
+# KOSHA 가 석유(PETROLEUM, CAS 8002-05-9 = 원유)에 총칭 UN1993 을 붙였다. 원유 화물의
+# 고유 엔트리는 UN1267 이라 화물 행에는 그걸 쓴다(chem_id_for 위 주석, 2026-08-02 정정).
+UN_OVERRIDE = {"000751": "1267"}
+
+# 선석 액체 취급 분류 키워드. berth(웹 '주요취급화물')와 UPA 분류 양쪽 표기.
 BERTH_CATEGORY_KEYWORDS: list[tuple[str, str]] = [
     ("원유", "원유"),
     ("유류", "유류"), ("석유정제품", "유류"), ("연료", "유류"),
@@ -193,7 +205,7 @@ BERTH_CATEGORY_KEYWORDS: list[tuple[str, str]] = [
     ("가스", "가스"),
 ]
 
-# berth.operator_name → ulsan_terminals.TERMINAL_CARGO_UN 키.
+# berth.operator_name → ulsan_terminals.TERMINAL_CARGO_SCOPE 키.
 # 한 부두에 운영사가 여럿이면(6부두 등) 어느 선석인지 모르므로 연결하지 않는다.
 OPERATOR_TERMINAL: list[tuple[str, str]] = [
     ("정일스톨트헤븐", "JEONGIL_STOLTHAVEN"),
@@ -205,11 +217,13 @@ OPERATOR_TERMINAL: list[tuple[str, str]] = [
 ]
 
 # 한 입항 건에 싣는 화물 종수 상한 (근거: 원유 3계통 직송배관 / MR 탱커 사양 6 grades /
-# LPG 대형선 2-grade / LNG 단일). 케미칼·급유선은 후보 수까지. 기타유조선은 근거 없어
+# LPG 대형선 2-grade / LNG 단일). 급유선은 후보 수까지. 기타유조선은 근거 없어
 # 석유제품운반선 값을 빌린다(가정).
+# 케미칼운반선 8 [가정, 2026-09-28] — 후보가 UN 목록 8종에서 MSDS 수십 종으로 늘어
+# 상한이 필요해졌다. 예전 실측 최대(입항 건당 8종)를 그대로 쓴다.
 PARCEL_MAX: dict[str, int] = {
     "원유운반선": 3, "석유제품운반선": 6, "석유제품/케미칼겸용": 6, "기타유조선": 6,
-    "LPG운반선": 2, "케미칼가스운반선": 2, "LNG운반선": 1,
+    "LPG운반선": 2, "케미칼가스운반선": 2, "LNG운반선": 1, "케미칼운반선": 8,
 }
 
 # ---------------------------------------------------------------------------
@@ -514,7 +528,7 @@ def load_berth_profiles() -> dict:
         terminal = None
         if len(ops) == 1:
             for kw, key in OPERATOR_TERMINAL:
-                if kw in ops[0] and ulsan_terminals.cargo_un_for_terminal(key):
+                if kw in ops[0] and ulsan_terminals.cargo_scope_for_terminal(key):
                     terminal = key
                     break
         prof[r["wharf_name"]] = {"cats": bc | uc, "cat_src": "+".join(src), "terminal": terminal}
@@ -571,48 +585,108 @@ def resolve_wharf(call, next_arrival, fmap_d, alias_d, vts_by_cs):
     return None, "선석 미정"
 
 
-def candidates_for(call, wharf, prof):
-    """(후보 UN 집합, 근거 문자열들)."""
+def load_cargo_pool() -> dict:
+    """후보 물질 — chem_id → {un, name, cat, imdg, ship_cat} (규칙 ②, 2026-09-28).
+
+    mart.msds_flat(백엔드 판정이 조인하는 뷰와 같은 원천) 중 UN 번호가 있고 화물 대분류
+    (cargo_category_loader.CARGO_CATEGORIES — 스케줄링 선석 탐색과 같은 분류)가 있는 물질.
+    UN 이 없는 물질은 mart.berth_current_cargo 가 판정 대상에서 빼므로(dg_un_no IS NOT NULL)
+    넣지 않는다. ship_cat 은 선종·선석 대조용 분류다 — IMDG Class 2 면 '가스'(규칙 ③).
+    """
+    import html
+    import re
+
+    # 모듈 import 시 Neo4j 환경변수를 검사하고 logging.basicConfig 를 부른다 — 여기서
+    # 늦게 import 해야 .env 를 읽은 뒤이고 스케줄러의 로깅 설정도 덮지 않는다.
+    from data_pipeline.loaders.cargo_category_loader import CHEM_ID_TO_CATEGORY
+
+    df = _read_db("""
+        SELECT chem_id, name_ko, dg_un_no, imdg_class FROM mart.msds_flat
+        WHERE dg_un_no ~ '[0-9]{4}'
+    """)
+    if df is None:
+        raise SystemExit("[중단] mart.msds_flat 을 읽지 못했다.")
+    pool = {}
+    for r in df.itertuples():
+        cat = CHEM_ID_TO_CATEGORY.get(r.chem_id)
+        if not cat or r.chem_id in NON_BULK_CHEM_IDS:
+            continue
+        imdg = _norm(r.imdg_class)
+        pool[r.chem_id] = {
+            "un": UN_OVERRIDE.get(r.chem_id) or re.search(r"[0-9]{4}", r.dg_un_no).group(),
+            "name": html.unescape(_norm(r.name_ko)),
+            "cat": cat,
+            "imdg": imdg,
+            "ship_cat": "가스" if imdg.startswith("2") else cat,
+        }
+    return pool
+
+
+def _in_family(e: dict, chem_id: str, fam: dict) -> bool:
+    return e["cat"] in fam["cats"] or e["ship_cat"] in fam["cats"] or chem_id in fam["chem_ids"]
+
+
+def _berth_accepts(p: dict, chem_id: str, e: dict) -> bool:
+    """선석 조건 — 터미널 취급 범위가 있으면 그것, 없으면 선석 액체 분류(규칙 ④)."""
+    if p["terminal"]:
+        s = ulsan_terminals.cargo_scope_for_terminal(p["terminal"])
+        if chem_id in s.get("chem_ids", ()):
+            return True
+        return e["ship_cat"] in s["cats"] and (not s.get("class3_only") or e["imdg"] == "3")
+    return e["ship_cat"] in p["cats"]
+
+
+def candidates_for(call, wharf, prof, pool):
+    """(후보 집합, 근거 문자열들). 후보는 chem_id — LNG 만 MSDS 가 없어 UN 1972 그대로."""
     kind = _norm(call.ship_kind_category)
     code = _norm(call.cargo_class_code).split(".")[0]
-    # 코드가 있어도 대응 물질이 없으면(38 각종 화학공업생산품) 선종 목록으로 간다 — 규칙 ②
-    if HS_FAMILY_UN.get(code):
-        base, why = set(HS_FAMILY_UN[code]), [f"대표화물코드 {code}"]
+    why = [f"선종({kind or '미상'})"]
+    # LNG(UN1972, 극저온 메탄)는 LNG선만 싣고, LNG선은 LNG 만 싣는다. MSDS 가 없어 판정불가다.
+    if kind == LNG_SHIP_KIND:
+        return {LNG_UN}, why
+    if kind == BUNKER_KIND:
+        # 급유선은 대표화물코드가 27(광물성연료)이어도 싣는 건 연료유다 — 계열 전체로
+        # 넓히면 급유선이 가솔린·벤젠까지 싣는 비현실적 결과가 나온다(실측).
+        base = set(BUNKER_CHEM_IDS) & pool.keys()
     else:
-        base = set(imdg_dgl.SHIP_KIND_ALLOWED_UN.get(kind, ())) | set(SHIP_KIND_EXTRA_UN.get(kind, ()))
-        why = [f"선종({kind or '미상'})"]
-    base = (base & GAS_UN) if kind in GAS_SHIP_KINDS else (base - GAS_UN)
-    # LNG(UN1972, 극저온 메탄)는 LNG선만 싣는다. 대표화물코드 27 은 가스 계열 전체라
-    # LPG선·케미칼가스선에도 LNG 가 뽑혔고, LNG 는 MSDS 가 없어 판정불가가 됐다(9/27 실측 3건).
-    if kind != LNG_SHIP_KIND:
-        base.discard(LNG_UN)
-    else:
-        base = {LNG_UN}
-    # 급유선은 대표화물코드가 27(광물성연료)이어도 싣는 건 연료유다 — 계열 전체
-    # (가솔린·벤젠…)로 넓히면 급유선이 5종을 싣는 비현실적 결과가 나온다(실측).
-    if kind in SHIP_KIND_EXTRA_UN:
-        base &= set(SHIP_KIND_EXTRA_UN[kind])
+        cats = SHIP_KIND_CATS.get(kind, frozenset())
+        base = {c for c, e in pool.items() if e["ship_cat"] in cats}
+        if kind != "케미칼가스운반선":
+            base.discard(ETHYLENE_CHEM_ID)
+        fam = HS_FAMILY.get(code)
+        if fam and base:
+            narrowed = {c for c in base if _in_family(pool[c], c, fam)}
+            if code == "29":
+                narrowed -= HS_INORGANIC_CHEM_IDS   # 29 는 유기화학품 — 황산·질산·암모니아 제외
+            if narrowed:
+                base = narrowed
+                why.append(f"대표화물코드 {code}")
+            else:
+                why.append(f"대표화물코드 {code} 불일치→선종")
 
     p = prof.get(wharf) if wharf else None
-    if p and p["terminal"]:
-        cand = base & set(ulsan_terminals.cargo_un_for_terminal(p["terminal"]))
-        why.append(f"터미널 취급품목({p['terminal']})")
-    elif p and p["cats"]:
-        allowed = set().union(*(BERTH_CATEGORY_UN[c] for c in p["cats"]))
-        cand = base & allowed
-        why.append(f"선석분류({'·'.join(sorted(p['cats']))}/{p['cat_src']})")
+    if p and (p["terminal"] or p["cats"]):
+        cand = {c for c in base if _berth_accepts(p, c, pool[c])}
+        why.append(f"터미널 취급범위({p['terminal']})" if p["terminal"]
+                   else f"선석분류({'·'.join(sorted(p['cats']))}/{p['cat_src']})")
+        if not cand and base:
+            cand = base                         # 규칙 ⑥ — 선석 조건과 충돌하면 선종을 따른다
+            why.append("선석분류 충돌→선종 우선")
     else:
         cand = base
         if wharf:
             why.append("선석조건 없음")        # 선석 미정은 resolve_wharf 근거가 따로 붙는다
-    if not cand and base and p and (p["terminal"] or p["cats"]):
-        cand = base                             # 규칙 ⑥ — 선석 조건과 충돌하면 선종을 따른다
-        why.append("선석분류 충돌→선종 우선")
     return cand, why
 
 
-def make_call_row(call, wharf, un, parcel_no, n_parcels, basis, rng):
-    e = imdg_dgl.DGL.get(un) if un else None
+def make_call_row(call, wharf, cand, pool, parcel_no, n_parcels, basis, rng):
+    """cand = chem_id(후보 물질) · LNG_UN · None(물질 미특정)."""
+    if cand in pool:
+        chem_id, un, name = cand, pool[cand]["un"], pool[cand]["name"]
+    elif cand == LNG_UN:
+        chem_id, un, name = "", LNG_UN, imdg_dgl.DGL[LNG_UN].psn_ko
+    else:
+        chem_id, un, name = "", None, "물질 미특정"
     wton = round(rng.uniform(500, 30000), 1)
     io = rng.choice(["I", "O"])
     key = call_key(call.cs, call.entry_year, call.entry_count)
@@ -632,8 +706,9 @@ def make_call_row(call, wharf, un, parcel_no, n_parcels, basis, rng):
         "io_se_name": IO_SE_NAME_BY_CODE[io],
         "facility_name": wharf or _norm(call.arrival_facility_nm) or None,
         "cargo_se_name": "액체",
-        "cargo_name_raw": e.psn_ko if e else "물질 미특정",
+        "cargo_name_raw": name,
         "dg_un_no": un,
+        "chem_id": chem_id,
         "cargo_basis": basis,
         "package_type_name": "벌크",
         "unload_method_name": "펌프",
@@ -662,7 +737,9 @@ def load_frozen_rows():
     '물질 미특정'이거나 MSDS 없는 UN)은 고정하지 않는다. 규칙 ⑥(선종 우선)과 LNG 제한을
     이미 본 입항 건에도 적용하기 위해서다. 화물이 정해진 입항 건은 그대로 둔다.
     """
-    cols = ", ".join(c for c in SCHEMA_COLUMNS if c != "chem_id")
+    # [2026-09-28] chem_id 도 저장값 그대로 싣는다 — 한 UN 에 물질이 여럿이라(UN3082 5종 등)
+    # UN 에서 다시 유도하면 다른 물질이 된다.
+    cols = ", ".join(SCHEMA_COLUMNS)
     df = _read_db(f"""
         SELECT {cols} FROM upa_cargo_manifest m
         WHERE source_table = :st
@@ -685,6 +762,7 @@ def build_v4():
     if not pos_calls.empty:
         calls = pd.concat([calls, pos_calls], ignore_index=True)
     prof = load_berth_profiles()
+    pool = load_cargo_pool()
     fmap_d, alias_d, vts_by_cs = load_facility_resolvers()
     frozen_rows, frozen_keys = load_frozen_rows()
 
@@ -703,24 +781,26 @@ def build_v4():
             wharf, wsrc = resolve_wharf(call, nxt, fmap_d, alias_d, vts_by_cs)
             stats["wharf_src"][wsrc] = stats["wharf_src"].get(wsrc, 0) + 1
             stats["key_src"][call.key_src] = stats["key_src"].get(call.key_src, 0) + 1
-            cand, why = candidates_for(call, wharf, prof)
+            cand, why = candidates_for(call, wharf, prof, pool)
             if call.key_src != "PORT-MIS":
                 why = why + [f"입항건={call.key_src}"]
-            stats["family_src"]["code" if why[0].startswith("대표화물코드") else "shipkind"] += 1
+            by_code = any(w.startswith("대표화물코드") and not w.endswith("선종") for w in why)
+            stats["family_src"]["code" if by_code else "shipkind"] += 1
             rng = _rng_for(key)
             kind = _norm(call.ship_kind_category)
             if not cand:
                 basis = "·".join(why + [wsrc, "물질 미특정"])
-                rows.append(make_call_row(call, wharf, None, 1, 1, basis, rng))
+                rows.append(make_call_row(call, wharf, None, pool, 1, 1, basis, rng))
                 stats["unspecified"] += 1
             else:
                 cap = min(PARCEL_MAX.get(kind, len(cand)), len(cand))
                 k = rng.randint(1, cap)
                 chosen = rng.sample(sorted(cand), k)
                 basis = "·".join(why + [wsrc, f"종수가정 {k}/{cap}"])
-                for n, un in enumerate(chosen, 1):
-                    rows.append(make_call_row(call, wharf, un, n, k, basis, rng))
+                for n, c in enumerate(chosen, 1):
+                    rows.append(make_call_row(call, wharf, c, pool, n, k, basis, rng))
             stats["new"] += 1
+    stats["pool"] = pool
     return rows, stats
 
 
@@ -876,6 +956,174 @@ def inject_violations(rows):
     return rows, scenarios
 
 
+# ===========================================================================
+# 시연 충돌 주입 (2026-09-29)
+#
+# 위 inject_violations 는 가짜 콜사인(VIO*)이라 실제 선박 목록·판정에는 나오지 않는다.
+# 정상 생성만으로는 이웃 선석 화물끼리 부딪히는 조합이 거의 없어(실측: 입항 선박 판정
+# 목록 78척 중 위험·배정불가 0) 시연에서 걸리는 장면이 없었다.
+# 그래서 **실제 배**의 현재 입항 건에 이웃 화물과 46 CFR 150 호환성 그룹이 부딪히는
+# 화물 1종을 더 싣는다. 이웃 계산은 백엔드 판정(scheduling.service
+# adjacent_cargos_for_wharf)과 같다 — 부두명 → 대표 Berth 노드(최소 수심) → ADJACENT_TO
+# → 그 부두에 지금 접안한 배(mart.vessel_presence)의 입항 건 화물.
+# 이웃은 배가 드나들면 바뀐다. 매 회차 지금 걸리는 배를 다시 세어 DEMO_CONFLICT_TARGET 에
+# 모자라는 만큼만 새로 싣는다(이미 실은 화물은 입항 건 고정으로 남는다).
+# 주입 행은 bl_no 끝이 '-D1', cargo_basis 가 '시연-혼재충돌' 로 시작한다.
+# ===========================================================================
+DEMO_CONFLICT_TARGET = 10       # 이웃과 부딪히는 배를 이만큼 유지한다
+DEMO_LIST_PAST_H, DEMO_LIST_AHEAD_H = 12, 72   # 입항 선박 판정 목록 범위(arrivals/upcoming 기본값)
+DEMO_MAX_PER_CHEM = 2           # 한 물질을 주입에 쓰는 최대 횟수 — 같은 원인만 되풀이되지 않게
+
+
+def _load_demo_graph():
+    """Neo4j → (부두명 → 이웃 부두명 집합, chem_id → 그룹번호, 불호환 그룹쌍, 안전 예외 쌍). 실패하면 None."""
+    try:
+        from neo4j import GraphDatabase
+        drv = GraphDatabase.driver(os.environ["NEO4J_URI"],
+                                   auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]))
+        with drv.session(database=os.getenv("NEO4J_DATABASE") or None) as s:
+            # 백엔드 _CYPHER_GET_BERTH_BY_WHARF_NAME 과 같은 대표 노드(최소 수심) 선택
+            rep = {}
+            for r in s.run("MATCH (b:Berth) RETURN b.wharf_name AS w, b.id AS id, b.depth_m AS d"):
+                cur = rep.get(r["w"])
+                if cur is None or (r["d"] is not None and (cur[1] is None or r["d"] < cur[1])):
+                    rep[r["w"]] = (r["id"], r["d"])
+            adj_rows = s.run("""
+                MATCH (b:Berth)-[:ADJACENT_TO]->(n:Berth)-[:HANDLES]->(:CargoCategory)
+                RETURN DISTINCT b.id AS id, n.wharf_name AS nw""").data()
+            group = {r["c"]: r["g"] for r in s.run(
+                "MATCH (c:Chemical)-[:IN_COMPATIBILITY_GROUP]->(g:CompatibilityGroup) RETURN c.id AS c, g.group_no AS g")}
+            bad = {(r["a"], r["b"]) for r in s.run(
+                "MATCH (a:CompatibilityGroup)-[:INCOMPATIBLE_WITH_GROUP]->(b:CompatibilityGroup) "
+                "RETURN a.group_no AS a, b.group_no AS b")}
+            safe = {(r["a"], r["b"]) for r in s.run(
+                "MATCH (a:Chemical)-[:BULK_COMPAT_SAFE_EXCEPTION]->(b:Chemical) RETURN a.id AS a, b.id AS b")}
+        drv.close()
+    except Exception as e:
+        print(f"  (시연 충돌 주입 생략 — Neo4j 조회 불가: {str(e)[:120]})")
+        return None
+    by_id = {}
+    for r in adj_rows:
+        by_id.setdefault(r["id"], set()).add(r["nw"])
+    neighbors = {w: by_id.get(bid, set()) for w, (bid, _d) in rep.items()}
+    return neighbors, group, bad, safe
+
+
+def inject_demo_conflicts(rows, pool):
+    """실제 배 입항 건에 이웃 화물과 부딪히는 화물을 더 싣는다. (추가 행 목록, 걸린 배 수) 반환."""
+    g = _load_demo_graph()
+    if g is None:
+        return [], 0
+    neighbors, group, bad, safe = g
+    alias = _read_db("""SELECT source_name, wharf_name FROM mart.facility_alias
+                        WHERE facility_type = 'BERTH' AND wharf_name IS NOT NULL""")
+    present = _read_db("""
+        SELECT upper(btrim(p.callsgn)) AS cs, p.berth_name, vc.port_call_key
+        FROM mart.vessel_presence p
+        JOIN mart.vessel_current_call vc ON vc.callsgn = p.callsgn
+        WHERE p.presence_zone = 'BERTH' AND p.callsgn IS NOT NULL
+    """)
+    if alias is None or present is None:
+        return [], 0
+    alias_d = dict(zip(alias["source_name"], alias["wharf_name"]))
+
+    by_key: dict[str, list[dict]] = {}
+    for r in rows:
+        if r.get("source_table") == V4_SOURCE_TABLE:
+            by_key.setdefault(call_key(r["callsgn"], r["ptent_yr"], r["voyage_no"]), []).append(r)
+
+    def chems(key):
+        return {_norm(r.get("chem_id")) for r in by_key.get(key, []) if _norm(r.get("chem_id"))}
+
+    # 지금 접안한 배: 콜사인 → (부두, 입항 건 키)
+    berthed = {}
+    for r in present.itertuples():
+        w = alias_d.get(r.berth_name)
+        if w and r.port_call_key in by_key:
+            berthed[r.cs] = (w, r.port_call_key)
+
+    def neighbor_chems(cs, wharf):
+        out = {}
+        for ocs, (ow, okey) in berthed.items():
+            if ocs != cs and ow in neighbors.get(wharf, ()):
+                for c in chems(okey):
+                    out.setdefault(c, ow)
+        return out
+
+    def clashes(x, y):
+        return (group.get(x), group.get(y)) in bad and (x, y) not in safe
+
+    # 판정 대상: 지금 접안한 배 + 입항 선박 판정 목록 범위의 입항 건(입항 전 배는 배정 선석 기준)
+    now = pd.Timestamp.now("UTC")
+    targets, in_list = {}, set()
+    for cs, (w, key) in berthed.items():
+        targets[key] = (cs, w)
+    for key, rs in by_key.items():
+        t = pd.to_datetime(rs[0].get("arrival_at_utc"), utc=True, errors="coerce")
+        if pd.isna(t) or not (now - pd.Timedelta(hours=DEMO_LIST_PAST_H) <= t
+                              <= now + pd.Timedelta(hours=DEMO_LIST_AHEAD_H)):
+            continue
+        w = alias_d.get(_norm(rs[0].get("facility_name"))) or _norm(rs[0].get("facility_name"))
+        if key in targets or w in neighbors:
+            in_list.add(key)
+            targets.setdefault(key, (rs[0]["callsgn"], w))
+
+    def is_flagged(key):
+        cs, w = targets[key]
+        nb = neighbor_chems(cs, w)
+        return any(clashes(x, y) for x in chems(key) for y in nb)
+
+    added = []
+    flagged = {k for k in targets if is_flagged(k)}
+    # 물질별 주입 횟수 — 가장 적게 쓴 물질부터 고른다. 질산은 거의 모든 유기물과 부딪혀
+    # 그냥 두면 주입 7행 중 5행이 질산이었다(시연이 "질산 때문에 배정불가" 하나로 반복됨).
+    used: dict[str, int] = {}
+    for rs in by_key.values():
+        for r in rs:
+            if _norm(r.get("bl_no")).endswith("-D1"):
+                used[_norm(r.get("chem_id"))] = used.get(_norm(r.get("chem_id")), 0) + 1
+    # 목록에 보이는 입항 건을 먼저, 그 안에서는 키 해시 순(회차마다 같은 순서)
+    order = sorted(targets, key=lambda k: (k not in in_list, hashlib.sha256(k.encode()).hexdigest()))
+    for key in order:
+        if len(flagged) >= DEMO_CONFLICT_TARGET:
+            break
+        if key in flagged or any(_norm(r.get("bl_no")).endswith("-D1") for r in by_key[key]):
+            continue
+        cs, w = targets[key]
+        nb = neighbor_chems(cs, w)
+        base = by_key[key][0]
+        cats = SHIP_KIND_CATS.get(_norm(base.get("vessel_type_name")), frozenset())
+        own = chems(key)
+        rng = _rng_for("DEMO-" + key)
+        options = sorted((x, y) for x, e in pool.items() if e["ship_cat"] in cats and x not in own
+                         for y in nb if clashes(x, y))
+        if not options:
+            continue
+        least = min(used.get(x, 0) for x, _ in options)
+        if least >= DEMO_MAX_PER_CHEM:
+            continue                    # 이 배는 이미 많이 쓴 물질로만 걸린다 — 다른 배에서 고른다
+        x, y = rng.choice([o for o in options if used.get(o[0], 0) == least])
+        used[x] = used.get(x, 0) + 1
+        e = pool[x]
+        wton = round(rng.uniform(500, 30000), 1)
+        row = dict(base)
+        row.update({
+            "bl_no": f"SYN-{key}-D1",
+            "cargo_name_raw": e["name"], "dg_un_no": e["un"], "chem_id": x,
+            "cargo_basis": (f"시연-혼재충돌 — 이웃 {nb[y]} '{pool.get(y, {}).get('name', y)}' 와 "
+                            f"46 CFR 150 그룹 {group[x]}↔{group[y]} 불호환(의도적 주입)"),
+            "vol_ton": wton, "weight_ton": wton,
+            "bulk_vol_size": round(wton * 1.1, 1), "bulk_weight_size": wton,
+            "collected_at_utc": pd.Timestamp.now("UTC").isoformat(),
+            "quality_flag": "OK",
+        })
+        by_key[key].append(row)
+        added.append(row)
+        # 이웃 쪽 배도 이 화물을 이웃으로 보게 되므로 다시 센다
+        flagged = {k for k in targets if is_flagged(k)}
+    return added, len(flagged)
+
+
 def build_weather_violation_rows():
     """기상 초과 시나리오(V-WX-01)용 합성 관측 행."""
     return [{
@@ -894,19 +1142,36 @@ def build_weather_violation_rows():
 
 
 # ===========================================================================
-def enforce_dgl(rows) -> None:
+def enforce_dgl(rows, pool) -> None:
     """
-    생성된 전 행의 (화물명, UN, Class, 용기등급) 조합을 DGL 참조표로 검증한다.
+    생성된 전 행의 (화물명, UN, Class, 용기등급) 조합을 검증한다.
     하나라도 어긋나면 예외를 던져 **CSV 자체가 나오지 않게** 한다.
 
     조용히 틀린 합성 데이터가 유통되는 것이 이 프로젝트에서 가장 위험하다.
     스키마 39컬럼이 맞아도 내용이 틀리면 아무 의미가 없기 때문이다.
+
+    [2026-09-28] chem_id 가 있는 행(MSDS 후보 풀에서 뽑은 v4 행)은 그 물질의 MSDS 값
+    (load_cargo_pool)과 대조한다. 나머지(위반 주입·LNG)는 전처럼 DGL 참조표로 검증한다.
     """
     problems = []
     for r in rows:
         un = r.get("dg_un_no")
         if not un:
             continue                      # 비위험물 또는 UN 누락 시나리오(V-DG-01)
+        chem_id = _norm(r.get("chem_id"))
+        if chem_id:
+            e = pool.get(chem_id)
+            if e is not None and (_norm(un), _norm(r.get("cargo_name_raw"))) == (e["un"], e["name"]):
+                continue
+            # 2026-09-28 이전에 동결된 v4 행은 DGL 표기(예: '디젤 연료/경유')다 — 그 UN 의
+            # DGL 통용명과 맞으면 통과시킨다. 안 그러면 옛 행이 남은 DB(RDS)에서 매 회차 실패한다.
+            legacy = imdg_dgl.lookup(un)
+            if legacy is not None and r.get("cargo_name_raw") == legacy.psn_ko:
+                continue
+            problems.append(f"{r['bl_no']}: chem_id {chem_id} 의 UN{un} '{r.get('cargo_name_raw')}' 가 "
+                            f"MSDS 값({'없음' if e is None else 'UN' + e['un'] + ' ' + repr(e['name'])})"
+                            "과도 DGL 통용명과도 맞지 않음")
+            continue
         # manifest 에 Class·PG 컬럼이 없으므로 DGL 값으로 역검증한다:
         # UN 이 참조표에 있고, 화물명이 그 UN 의 국문 통용명과 일치하는가.
         e = imdg_dgl.lookup(un)
@@ -1036,10 +1301,14 @@ def write_csv(rows, path, columns):
     if "dg_un_no" in df.columns:
         df["dg_un_no"] = df["dg_un_no"].apply(
             lambda v: "" if pd.isna(v) else str(v).split(".")[0])
-        # chem_id 는 **최종 확정된 dg_un_no** 에서 파생한다. 위반 주입이
+        # 위반 주입 행의 chem_id 는 **최종 확정된 dg_un_no** 에서 파생한다. 위반 주입이
         # dg_un_no 를 바꾸는 경우(UN번호 누락 위반 등)도 여기서 함께 반영된다 —
         # make_row 시점에 넣으면 위반 주입 뒤 값이 어긋난다.
-        df["chem_id"] = df["dg_un_no"].apply(chem_id_for)
+        # v4 행은 물질을 chem_id 로 뽑았으므로 그 값을 그대로 둔다(2026-09-28).
+        own = df["chem_id"].fillna("").astype(str).str.strip()
+        empty = own == ""
+        own.loc[empty] = df.loc[empty, "dg_un_no"].apply(chem_id_for)
+        df["chem_id"] = own
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return df
 
@@ -1068,11 +1337,14 @@ def main():
                     help="생성·검증·요약만 하고 파일/DB 에 쓰지 않는다")
     ap.add_argument("--load", action="store_true",
                     help="생성 후 DB upa_cargo_manifest 에 bl_no 키로 UPSERT")
+    ap.add_argument("--no-demo-conflicts", action="store_true",
+                    help="시연 충돌 주입(실제 배에 이웃과 부딪히는 화물 추가)을 하지 않는다")
     args = ap.parse_args()
-    run(no_violations=args.no_violations, dry_run=args.dry_run, load=args.load)
+    run(no_violations=args.no_violations, dry_run=args.dry_run, load=args.load,
+        demo_conflicts=not args.no_demo_conflicts)
 
 
-def run(no_violations=False, dry_run=False, load=False, write_samples=True):
+def run(no_violations=False, dry_run=False, load=False, write_samples=True, demo_conflicts=True):
     """생성 → 검증 → staging CSV → (load 면) DB UPSERT.
 
     pipeline_scheduler 의 cargo 도메인은 write_samples=False 로 부른다 — samples/ 는
@@ -1083,11 +1355,13 @@ def run(no_violations=False, dry_run=False, load=False, write_samples=True):
     random.seed(20260727)
     normal_rows, st = build_v4()
     rows = [dict(r) for r in normal_rows]
+    demo_rows, demo_flagged = inject_demo_conflicts(rows, st["pool"]) if demo_conflicts else ([], 0)
+    rows += demo_rows
     scenarios = []
     if not no_violations:
         rows, scenarios = inject_violations(rows)
 
-    enforce_dgl(rows)                              # ★ 실패하면 여기서 멈춘다
+    enforce_dgl(rows, st["pool"])                  # ★ 실패하면 여기서 멈춘다
 
     df = pd.DataFrame(rows)
     liquid = df[df["dg_un_no"].fillna("").astype(str).str.strip() != ""]
@@ -1101,10 +1375,15 @@ def run(no_violations=False, dry_run=False, load=False, write_samples=True):
     print(f"  선석 근거       : {st['wharf_src']}")
     print(f"  입항 건 출처    : {st['key_src']}  (신규 생성분 기준)")
     print(f"  화물 계열 근거  : 대표화물코드 {st['family_src']['code']} / 선종 {st['family_src']['shipkind']}")
+    print(f"  후보 물질       : {len(st['pool'])}종 (MSDS · UN · 화물 대분류 보유)")
     print(f"  물질 미특정     : {st['unspecified']} 입항 건")
     print(f"  v4 행           : {len(v4)}  (입항 건당 화물 평균 {per_call.mean():.2f}, 최대 {per_call.max()})")
     print(f"  위반 주입 행    : {len(df) - len(v4)}  ({'제외' if no_violations else '포함'})")
-    print(f"  UN 번호 있는 행 : {len(liquid)}   DGL 검증 통과")
+    print(f"  시연 충돌 주입  : 이번 회차 {len(demo_rows)}행 추가 · 이웃과 부딪히는 배 {demo_flagged}척"
+          f" (목표 {DEMO_CONFLICT_TARGET}, {'켜짐' if demo_conflicts else '꺼짐'})")
+    for r in demo_rows:
+        print(f"    + {r['callsgn']} {r['vessel_name']} @ {r['facility_name']}: {r['cargo_name_raw']} — {r['cargo_basis']}")
+    print(f"  UN 번호 있는 행 : {len(liquid)}   MSDS·DGL 검증 통과")
 
     if dry_run:
         print("\n  [dry-run] 파일·DB 에 쓰지 않았다.")
